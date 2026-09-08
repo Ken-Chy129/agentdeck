@@ -54,6 +54,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/admin/machines/{id}", s.withAdmin(s.patchMachine))
 	mux.HandleFunc("DELETE /api/admin/machines/{id}", s.withAdmin(s.deleteMachine))
 	mux.HandleFunc("GET /api/admin/machines/{id}/logs", s.withAdmin(s.machineLogs))
+	mux.HandleFunc("GET /api/admin/configs", s.withAdmin(s.allConfigs))
 	mux.HandleFunc("GET /api/admin/machines/{id}/jobs", s.withAdmin(s.machineJobs))
 	mux.HandleFunc("POST /api/admin/machines/{id}/jobs", s.withAdmin(s.createJob))
 	mux.HandleFunc("DELETE /api/admin/jobs/{id}", s.withAdmin(s.cancelJob))
@@ -164,6 +165,13 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		inv, _ := json.Marshal(req.Inventory)
 		local, _ := json.Marshal(req.LocalSkills)
 		if err := s.st.SaveInventory(r.Context(), m.ID, inv, local); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.Snapshot != nil {
+		snap, _ := json.Marshal(req.Snapshot)
+		if err := s.st.SaveSnapshot(r.Context(), m.ID, snap); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -320,6 +328,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	assign, _ := s.st.AllAssignments(r.Context())
 	if machines == nil {
 		machines = []*store.Machine{}
+	}
+	for _, m := range machines {
+		m.Snapshot = nil
 	}
 	if skills == nil {
 		skills = []*store.Skill{}
@@ -632,4 +643,24 @@ func (s *Server) publishFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"version": v, "created": created})
+}
+
+// allConfigs returns every machine's redacted snapshot: the "what is configured where" view.
+func (s *Server) allConfigs(w http.ResponseWriter, r *http.Request) {
+	ms, err := s.st.ListMachines(r.Context())
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	type entry struct {
+		MachineID   string          `json:"machine_id"`
+		MachineName string          `json:"machine_name"`
+		SnapshotAt  string          `json:"snapshot_at"`
+		Snapshot    json.RawMessage `json:"snapshot"`
+	}
+	out := []entry{}
+	for _, m := range ms {
+		out = append(out, entry{MachineID: m.ID, MachineName: m.Name, SnapshotAt: m.SnapshotAt, Snapshot: m.Snapshot})
+	}
+	writeJSON(w, 200, out)
 }

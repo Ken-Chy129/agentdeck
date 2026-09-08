@@ -52,6 +52,7 @@ type LocalSkill struct {
 
 type SyncRequest struct {
 	Inventory   *Inventory   `json:"inventory,omitempty"`
+	Snapshot    *Snapshot    `json:"snapshot,omitempty"`
 	LocalSkills []LocalSkill `json:"local_skills"`
 	CLIVersion  string       `json:"cli_version"`
 }
@@ -121,3 +122,30 @@ const (
 	JobBrewUpgrade = "brew_upgrade" // {"formula":"gh"}
 	JobEcho        = "echo"         // {"message":"..."} smoke test
 )
+
+// ---- config collection (client -> server) ----
+
+type ConfigFile struct {
+	Tool      string `json:"tool"`
+	Path      string `json:"path"`
+	Format    string `json:"format"`
+	Size      int64  `json:"size"`
+	ModTime   string `json:"mod_time"`
+	Digest    string `json:"digest"`  // of the real file, for change detection
+	Content   string `json:"content"` // redacted
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+type EnvExport struct {
+	Name        string `json:"name"`
+	Value       string `json:"value"` // redacted if Kind == secret
+	Kind        string `json:"kind"`  // plain | secret | append
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+type Snapshot struct {
+	Configs []ConfigFile `json:"configs"`
+	Exports []EnvExport  `json:"exports"`
+}

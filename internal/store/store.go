@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS machines (
   last_seen_at  TEXT,
   inventory     TEXT,
   inventory_at  TEXT,
-  local_skills  TEXT
+  local_skills  TEXT,
+  snapshot      TEXT,
+  snapshot_at   TEXT
 );
 CREATE TABLE IF NOT EXISTS enroll_tokens (
   token_hash TEXT PRIMARY KEY,
@@ -101,8 +103,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_machine ON jobs(machine_id, status);
 `
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// additive column migrations for existing databases
+	for _, col := range []string{"snapshot TEXT", "snapshot_at TEXT"} {
+		_, _ = s.db.Exec("ALTER TABLE machines ADD COLUMN " + col)
+	}
+	return nil
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -131,6 +139,8 @@ type Machine struct {
 	Inventory   json.RawMessage `json:"inventory,omitempty"`
 	InventoryAt string          `json:"inventory_at,omitempty"`
 	LocalSkills json.RawMessage `json:"local_skills,omitempty"`
+	Snapshot    json.RawMessage `json:"snapshot,omitempty"`
+	SnapshotAt  string          `json:"snapshot_at,omitempty"`
 }
 
 func (s *Store) CreateEnrollToken(ctx context.Context, note string) (string, error) {
@@ -174,24 +184,18 @@ func (s *Store) MachineByID(ctx context.Context, id string) (*Machine, error) {
 	return s.scanMachine(s.db.QueryRowContext(ctx, `SELECT `+machineCols+` FROM machines WHERE id=?`, id))
 }
 
-const machineCols = `id,name,os,arch,hostname,created_at,last_seen_at,inventory,inventory_at,local_skills`
+const machineCols = `id,name,os,arch,hostname,created_at,last_seen_at,inventory,inventory_at,local_skills,snapshot,snapshot_at`
 
 func (s *Store) scanMachine(r *sql.Row) (*Machine, error) {
 	m := &Machine{}
-	var last, inv, invAt, local sql.NullString
-	if err := r.Scan(&m.ID, &m.Name, &m.OS, &m.Arch, &m.Hostname, &m.CreatedAt, &last, &inv, &invAt, &local); err != nil {
+	var last, inv, invAt, local, snap, snapAt sql.NullString
+	if err := r.Scan(&m.ID, &m.Name, &m.OS, &m.Arch, &m.Hostname, &m.CreatedAt, &last, &inv, &invAt, &local, &snap, &snapAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
-	m.LastSeenAt, m.InventoryAt = last.String, invAt.String
-	if inv.Valid {
-		m.Inventory = json.RawMessage(inv.String)
-	}
-	if local.Valid {
-		m.LocalSkills = json.RawMessage(local.String)
-	}
+	fillMachine(m, last, inv, invAt, local, snap, snapAt)
 	return m, nil
 }
 
@@ -204,20 +208,32 @@ func (s *Store) ListMachines(ctx context.Context) ([]*Machine, error) {
 	var out []*Machine
 	for rows.Next() {
 		m := &Machine{}
-		var last, inv, invAt, local sql.NullString
-		if err := rows.Scan(&m.ID, &m.Name, &m.OS, &m.Arch, &m.Hostname, &m.CreatedAt, &last, &inv, &invAt, &local); err != nil {
+		var last, inv, invAt, local, snap, snapAt sql.NullString
+		if err := rows.Scan(&m.ID, &m.Name, &m.OS, &m.Arch, &m.Hostname, &m.CreatedAt, &last, &inv, &invAt, &local, &snap, &snapAt); err != nil {
 			return nil, err
 		}
-		m.LastSeenAt, m.InventoryAt = last.String, invAt.String
-		if inv.Valid {
-			m.Inventory = json.RawMessage(inv.String)
-		}
-		if local.Valid {
-			m.LocalSkills = json.RawMessage(local.String)
-		}
+		fillMachine(m, last, inv, invAt, local, snap, snapAt)
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func fillMachine(m *Machine, last, inv, invAt, local, snap, snapAt sql.NullString) {
+	m.LastSeenAt, m.InventoryAt, m.SnapshotAt = last.String, invAt.String, snapAt.String
+	if inv.Valid {
+		m.Inventory = json.RawMessage(inv.String)
+	}
+	if local.Valid {
+		m.LocalSkills = json.RawMessage(local.String)
+	}
+	if snap.Valid {
+		m.Snapshot = json.RawMessage(snap.String)
+	}
+}
+
+func (s *Store) SaveSnapshot(ctx context.Context, id string, snap json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE machines SET snapshot=?, snapshot_at=? WHERE id=?`, string(snap), now(), id)
+	return err
 }
 
 func (s *Store) TouchMachine(ctx context.Context, id string) error {

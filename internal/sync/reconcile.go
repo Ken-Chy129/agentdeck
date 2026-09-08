@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Ken-Chy129/agentdeck/internal/bundle"
+	"github.com/Ken-Chy129/agentdeck/internal/collect"
 	"github.com/Ken-Chy129/agentdeck/internal/inventory"
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
@@ -72,6 +73,7 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 	if opt.Inventory {
 		logf("collecting inventory…")
 		req.Inventory = inventory.Collect(ctx)
+		req.Snapshot = &protocol.Snapshot{Configs: collect.Configs(), Exports: collect.Exports()}
 	}
 	resp, err := cl.Sync(ctx, req)
 	if err != nil {

@@ -64,7 +64,7 @@ function route() {
   const hash = location.hash || '#/machines';
   const [, tab, id] = hash.split('/');
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
-  const view = { machines: id ? machineDetail : machines, skills: id ? skillDetail : skills, matrix }[tab] || machines;
+  const view = { machines: id ? machineDetail : machines, skills: id ? skillDetail : skills, matrix, configs, env: envView }[tab] || machines;
   view(decodeURIComponent(id || '')).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -238,6 +238,68 @@ function editor(k, existing) {
     };
   };
   render();
+}
+
+// ---------- configs (collected, read-only) ----------
+let configsCache = null;
+async function loadConfigs() { configsCache = await api('GET', '/api/admin/configs'); return configsCache; }
+async function configs(sel) {
+  const all = await loadConfigs();
+  const tools = [...new Set(all.flatMap(m => (m.snapshot?.configs || []).map(c => c.tool)))].sort();
+  const machines = all.filter(m => m.snapshot);
+  // selection: tool[:machine[:path]]
+  let [tool, mid, pathIdx] = (sel || '').split(':');
+  tool = tool || tools[0];
+  const rows = machines.map(m => ({ m, files: (m.snapshot.configs || []).filter(c => c.tool === tool) })).filter(x => x.files.length);
+  if (!mid && rows[0]) mid = rows[0].m.machine_id;
+  const cur = rows.find(x => x.m.machine_id === mid);
+  const file = cur ? cur.files[+pathIdx || 0] : null;
+
+  app.innerHTML = `<h1>配置全貌 <span class="muted small">每台机器 sync 时采集，凭证已在机器端打码</span></h1>
+  <div class="tabs">${tools.map(t => `<button class="${t === tool ? 'active' : ''}" data-tool="${h(t)}">${h(t)} <span class="muted">${machines.filter(m => (m.snapshot.configs || []).some(c => c.tool === t)).length}</span></button>`).join('')}</div>
+  <div class="row" style="align-items:flex-start;gap:16px">
+    <div style="min-width:260px">
+      ${rows.map(x => `<div class="card" style="padding:10px 12px;margin-bottom:8px;${x.m.machine_id === mid ? 'border-color:var(--accent)' : ''}">
+        <div style="font-weight:600"><span class="dot ${online(x.m.snapshot_at)}"></span>${h(x.m.machine_name)}</div>
+        ${x.files.map((f, i) => `<div class="small mono" style="padding:3px 0;cursor:pointer;${x.m.machine_id === mid && i === (+pathIdx || 0) ? 'color:var(--accent)' : 'color:var(--muted)'}" data-sel="${h(tool)}:${x.m.machine_id}:${i}">${h(f.path)} <span class="muted">${kb(f.size)}</span></div>`).join('')}
+      </div>`).join('') || '<p class="muted">还没有机器上报过这个工具的配置</p>'}
+    </div>
+    <div class="card" style="flex:1;min-width:0">
+      ${file ? `<div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="mono">${h(cur.m.machine_name)} · ${h(file.path)}</span><span class="muted small">${h(file.format)} · 修改于 ${h(file.mod_time)} · 采集 ${ago(cur.m.snapshot_at)}</span></div>
+        <pre style="max-height:70vh;margin:0">${h(file.truncated ? '(文件过大，未采集)' : file.content)}</pre>` : '<p class="muted">选择左侧一个文件</p>'}
+    </div>
+  </div>
+  <p class="muted small" style="margin-top:12px">同一工具在不同机器上的差异一眼可见：切左侧机器即可。<code>&lt;redacted:xxxx&gt;</code> 里的 8 位是值的指纹，两台机器指纹相同 = 用的同一个 key。</p>`;
+  app.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { location.hash = '#/configs/' + b.dataset.tool; });
+  app.querySelectorAll('[data-sel]').forEach(d => d.onclick = () => { location.hash = '#/configs/' + d.dataset.sel; });
+}
+
+// ---------- env (collected exports across machines) ----------
+async function envView() {
+  const all = await loadConfigs();
+  const machines = all.filter(m => m.snapshot);
+  const byName = {};
+  machines.forEach(m => (m.snapshot.exports || []).forEach(e => {
+    if (e.kind === 'append') return; // PATH-style appends are noise here
+    (byName[e.name] ||= {})[m.machine_id] = e;
+  }));
+  const names = Object.keys(byName).sort((a, b) => {
+    const ka = byName[a], kb_ = byName[b];
+    const sa = Object.values(ka).some(e => e.kind === 'secret'), sb = Object.values(kb_).some(e => e.kind === 'secret');
+    if (sa !== sb) return sa ? -1 : 1;
+    return a.localeCompare(b);
+  });
+  const cell = (e) => {
+    if (!e) return '<span class="muted">—</span>';
+    if (e.kind === 'secret') return `<span class="pill" title="指纹 ${h(e.fingerprint)} · ${h(e.file)}:${e.line}">🔒 ${h(e.fingerprint)}</span>`;
+    return `<span class="mono small" title="${h(e.file)}:${e.line}">${h(e.value.length > 40 ? e.value.slice(0, 40) + '…' : e.value)}</span>`;
+  };
+  const consistent = (n) => { const vals = new Set(Object.values(byName[n]).map(e => e.kind === 'secret' ? e.fingerprint : e.value)); return vals.size === 1 && Object.keys(byName[n]).length === machines.length; };
+  app.innerHTML = `<h1>环境变量 <span class="muted small">来自各机器 shell rc 里的 export（PATH 追加已过滤）</span></h1>
+  <div class="card" style="overflow:auto"><table><tr><th>变量</th>${machines.map(m => `<th>${h(m.machine_name)}</th>`).join('')}<th></th></tr>
+  ${names.map(n => `<tr><td class="mono">${h(n)}</td>${machines.map(m => `<td>${cell(byName[n][m.machine_id])}</td>`).join('')}
+    <td>${consistent(n) ? '<span class="pill ok">一致</span>' : Object.keys(byName[n]).length === 1 ? '<span class="pill">仅一台</span>' : '<span class="pill warn">不一致</span>'}</td></tr>`).join('') || '<tr><td class="muted">尚无数据，等机器 sync</td></tr>'}</table></div>
+  <p class="muted small">🔒 后面的 8 位是值的指纹：同一行两台机器指纹相同，说明它们用的是同一个 key。下一步这里会变成可维护的总表，支持把变量导入到任意机器。</p>`;
 }
 
 // ---------- matrix ----------
