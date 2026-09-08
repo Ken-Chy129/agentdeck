@@ -31,7 +31,9 @@ export async function overviewView() {
   app.innerHTML = pageHeader({ title: '总览', desc: `${ms.length} 台机器 · 每台每 15 分钟同步一次` }) + `
   <div class="stats">
     <div class="stat ${onlineN < ms.length ? 'warn' : ''}"><b>${onlineN}<small> / ${ms.length}</small></b><span>机器在线</span></div>
-    <div class="stat"><b>${byKind('skill')}<small> · </small>${byKind('config')}<small> · </small>${byKind('env')}</b><span>Skill · 配置 · 环境变量</span></div>
+    <div class="stat"><b>${byKind('skill')}</b><span>Skill</span></div>
+    <div class="stat"><b>${byKind('config')}</b><span>配置 Profile</span></div>
+    <div class="stat"><b>${byKind('env')}</b><span>环境变量</span></div>
     <div class="stat ${pending ? 'warn' : ''}"><b>${pending}</b><span>待同步</span></div>
     <div class="stat ${failed ? 'bad' : ''}"><b>${failed}</b><span>同步失败</span></div>
     <div class="stat ${behind.length ? 'warn' : ''}"><b>${behind.length}</b><span>CLI 可升级</span></div>
@@ -49,9 +51,11 @@ export async function overviewView() {
    <div>
     <h2>需要关注</h2>
     <div class="card flush">
-    ${problems.length ? `<table><tbody>${problems.slice(0, 15).map(p => `<tr class="click" onclick="location.hash='${linkOf(p.r)}'"><td><span class="faint xs">${h(p.r.kind)}</span><br><span class="mono small">${h(p.r.name)}</span></td><td class="small">${h(p.m.name)}</td><td class="right"><span class="pill ${p.st.cls}" title="${h(p.st.detail || '')}">${h(p.st.text)}</span></td></tr>`).join('')}${problems.length > 15 ? `<tr><td class="muted small" colspan="3">…还有 ${problems.length - 15} 项</td></tr>` : ''}</tbody></table>` : ''}
-    ${behind.length ? `<table><tbody>${behind.map(t => `<tr class="click" onclick="location.hash='#/machines/${t.machine.id}'"><td><span class="faint xs">cli</span><br><span class="mono small">${h(t.name)}</span></td><td class="small">${h(t.machine.name)}</td><td class="right mono small"><span class="behind">${h(t.version)}</span> → ${h(latest[t.package])}</td></tr>`).join('')}</tbody></table>` : ''}
-    ${envDrift.length ? `<table><tbody>${envDrift.slice(0, 10).map(d => `<tr class="click" onclick="location.hash='#/env'"><td><span class="faint xs">env</span><br><span class="mono small">${h(d.name)}</span></td><td class="small muted">${d.machines} 台机器</td><td class="right"><span class="pill warn">${d.n} 种取值</span></td></tr>`).join('')}</tbody></table>` : ''}
+    ${problems.length || behind.length || envDrift.length ? `<table><tbody>
+    ${problems.slice(0, 15).map(p => `<tr class="click" onclick="location.hash='${linkOf(p.r)}'"><td><span class="kind">${h(p.r.kind)}</span><span class="mono small">${h(p.r.name)}</span></td><td class="small muted">${h(p.m.name)}</td><td class="right"><span class="pill ${p.st.cls}" title="${h(p.st.detail || '')}">${h(p.st.text)}</span></td></tr>`).join('')}${problems.length > 15 ? `<tr><td class="muted small" colspan="3">…还有 ${problems.length - 15} 项</td></tr>` : ''}
+    ${behind.map(t => `<tr class="click" onclick="location.hash='#/machines/${t.machine.id}/cli'"><td><span class="kind">cli</span><span class="mono small">${h(t.name)}</span></td><td class="small muted">${h(t.machine.name)}</td><td class="right mono small"><span class="behind">${h(t.version)}</span> <span class="faint">→</span> ${h(latest[t.package])}</td></tr>`).join('')}
+    ${envDrift.slice(0, 10).map(d => `<tr class="click" onclick="location.hash='#/env'"><td><span class="kind">env</span><span class="mono small">${h(d.name)}</span></td><td class="small muted">${d.machines} 台机器</td><td class="right"><span class="pill warn">${d.n} 种取值</span></td></tr>`).join('')}
+    </tbody></table>` : ''}
     ${!problems.length && !behind.length && !envDrift.length ? empty('一切正常 ✓') : ''}
     </div>
    </div>
