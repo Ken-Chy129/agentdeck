@@ -1,0 +1,93 @@
+// skillhubd is the server: API + embedded web console + SQLite.
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Ken-Chy129/skillhub/internal/api"
+	"github.com/Ken-Chy129/skillhub/internal/store"
+	"github.com/Ken-Chy129/skillhub/web"
+)
+
+func main() {
+	addr := flag.String("addr", envOr("SKILLHUB_ADDR", "127.0.0.1:8480"), "listen address")
+	dataDir := flag.String("data", envOr("SKILLHUB_DATA", "./data"), "data directory")
+	flag.Parse()
+
+	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
+		log.Fatal(err)
+	}
+	adminToken := strings.TrimSpace(os.Getenv("SKILLHUB_ADMIN_TOKEN"))
+	if adminToken == "" {
+		adminToken = loadOrCreateToken(filepath.Join(*dataDir, "admin_token"))
+	}
+
+	st, err := store.Open(filepath.Join(*dataDir, "skillhub.db"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer st.Close()
+
+	mux := http.NewServeMux()
+	api.New(st, adminToken).Register(mux)
+	mux.Handle("/", web.Handler())
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           logMW(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+	}
+	log.Printf("skillhubd listening on http://%s (data=%s)", *addr, *dataDir)
+	log.Fatal(srv.ListenAndServe())
+}
+
+func envOr(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
+func loadOrCreateToken(path string) string {
+	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
+		return strings.TrimSpace(string(b))
+	}
+	buf := make([]byte, 24)
+	rand.Read(buf)
+	tok := "shadmin_" + hex.EncodeToString(buf)
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Fprintf(os.Stderr, "generated admin token -> %s\n", path)
+	return tok
+}
+
+func logMW(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &statusWriter{ResponseWriter: w, code: 200}
+		next.ServeHTTP(rw, r)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.code, time.Since(start).Round(time.Millisecond))
+		}
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (s *statusWriter) WriteHeader(c int) { s.code = c; s.ResponseWriter.WriteHeader(c) }
