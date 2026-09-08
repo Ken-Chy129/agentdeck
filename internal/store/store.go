@@ -799,6 +799,69 @@ func (s *Store) QueuedJobs(ctx context.Context, machineID string) ([]*Job, error
 	return scanJobs(rows)
 }
 
+// ClaimJobs hands queued jobs to exactly one caller by flipping them to
+// 'running' in the same transaction. Both the long poll and the scheduled sync
+// pull from this queue, and without claiming they'd run a command twice.
+func (s *Store) ClaimJobs(ctx context.Context, machineID string) ([]*Job, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id,machine_id,type,payload,status,result,created_at,finished_at FROM jobs WHERE machine_id=? AND status='queued' ORDER BY id`, machineID)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := scanJobs(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET status='running' WHERE id=?`, j.ID); err != nil {
+			return nil, err
+		}
+		j.Status = "running"
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// RequeueStaleJobs rescues jobs whose machine died mid-run, so they don't sit
+// in 'running' forever.
+func (s *Store) RequeueStaleJobs(ctx context.Context, olderThan time.Duration) error {
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status='failed', result='machine went away while running', finished_at=? WHERE status='running' AND created_at < ?`, now(), cutoff)
+	return err
+}
+
+// JobByID fetches a single job so the console can poll one command's result.
+func (s *Store) JobByID(ctx context.Context, id int64) (*Job, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id,machine_id,type,payload,status,result,created_at,finished_at FROM jobs WHERE id=?`, id)
+	jobs, err := scanJobRow(row)
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func scanJobRow(row *sql.Row) (*Job, error) {
+	j := &Job{}
+	var payload string
+	var fin sql.NullString
+	if err := row.Scan(&j.ID, &j.MachineID, &j.Type, &payload, &j.Status, &j.Result, &j.CreatedAt, &fin); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	j.Payload = json.RawMessage(payload)
+	j.FinishedAt = fin.String
+	return j, nil
+}
+
 func scanJobs(rows *sql.Rows) ([]*Job, error) {
 	out := []*Job{}
 	for rows.Next() {

@@ -75,7 +75,11 @@ func Collect(ctx context.Context) *protocol.Inventory {
 	}
 
 	npmPkgs := map[string]string{}
+	npmPrefix := ""
 	if _, err := exec.LookPath("npm"); err == nil {
+		if out, err := run(ctx, "npm", "config", "get", "prefix"); err == nil {
+			npmPrefix = strings.TrimSpace(lastLine(out))
+		}
 		if out, err := run(ctx, "npm", "ls", "-g", "--depth=0", "--json"); err == nil || out != "" {
 			var doc struct {
 				Dependencies map[string]struct {
@@ -118,6 +122,8 @@ func Collect(ctx context.Context) *protocol.Inventory {
 			tool.Source = "native" // Anthropic's curl installer; upgrade with `claude update`
 		case strings.Contains(real, "/Cellar/") || strings.Contains(real, "/homebrew/") || strings.Contains(real, "/linuxbrew/"):
 			tool.Source = "brew"
+		case strings.Contains(real, "/.codex/packages/"):
+			tool.Source = "standalone" // Codex's own package manager; `codex update`
 		case strings.Contains(real, "/node_modules/") || strings.Contains(p, "/.nvm/") || strings.Contains(p, "/node_modules/"):
 			tool.Source = "npm-global"
 		}
@@ -129,6 +135,7 @@ func Collect(ctx context.Context) *protocol.Inventory {
 				tool.Source = "binary"
 			}
 		}
+		tool.Upgrade = upgradeCommand(tool, real, npmPrefix)
 		inv.Tools = append(inv.Tools, tool)
 	}
 
@@ -138,6 +145,53 @@ func Collect(ctx context.Context) *protocol.Inventory {
 
 func firstVersion(s string) string {
 	return verRe.FindString(s)
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
+}
+
+// npmPrefixOf recovers the install prefix from a resolved binary path, e.g.
+// /home/me/.local/lib/node_modules/@openai/codex/bin/codex.js -> /home/me/.local
+// This matters because `npm config get prefix` can point somewhere else
+// entirely (a root-owned /usr) while the tool actually lives under $HOME.
+func npmPrefixOf(realPath string) string {
+	i := strings.Index(realPath, "/lib/node_modules/")
+	if i <= 0 {
+		return ""
+	}
+	return realPath[:i]
+}
+
+// upgradeCommand returns the command that actually upgrades this tool here.
+func upgradeCommand(t protocol.CLITool, realPath, npmPrefix string) string {
+	switch t.Source {
+	case "native":
+		// Anthropic's installer manages its own versions directory.
+		if t.Name == "claude" {
+			return "claude update"
+		}
+	case "standalone":
+		if t.Name == "codex" {
+			return "codex update"
+		}
+	case "brew":
+		return "brew upgrade " + t.Name
+	case "npm-global":
+		if t.Package == "" {
+			return ""
+		}
+		cmd := "npm i -g " + t.Package + "@latest"
+		// If the tool lives under a prefix npm wouldn't pick by default, say so
+		// explicitly; otherwise the upgrade lands in the wrong place or fails
+		// with EACCES.
+		if p := npmPrefixOf(realPath); p != "" && p != npmPrefix {
+			cmd = "npm i -g --prefix " + p + " " + t.Package + "@latest"
+		}
+		return cmd
+	}
+	return ""
 }
 
 func home() string {

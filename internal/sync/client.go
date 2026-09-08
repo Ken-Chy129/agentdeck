@@ -19,7 +19,7 @@ import (
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 // Config lives at ~/.config/agentdeck/config.json (0600).
 type Config struct {
@@ -195,6 +195,19 @@ func (c *Client) Sync(ctx context.Context, req protocol.SyncRequest) (*protocol.
 
 func (c *Client) Report(ctx context.Context, rep protocol.SyncReport) error {
 	return c.JSON(ctx, "POST", "/api/agent/report", rep, nil)
+}
+
+// Poll parks a request on the server until a job shows up or the server times
+// out. The timeout here must exceed the server's poll window.
+func (c *Client) Poll(ctx context.Context) (*protocol.PollResponse, error) {
+	var out protocol.PollResponse
+	err := c.do(ctx, "GET", "/api/agent/poll", nil, "", &out)
+	return &out, err
+}
+
+// JobResult reports one finished job right away.
+func (c *Client) JobResult(ctx context.Context, res protocol.JobResult) error {
+	return c.JSON(ctx, "POST", fmt.Sprintf("/api/agent/jobs/%d/result", res.ID), res, nil)
 }
 
 func (c *Client) Archive(ctx context.Context, versionID int64) ([]byte, error) {

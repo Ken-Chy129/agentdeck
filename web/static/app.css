@@ -136,6 +136,9 @@ select{padding-right:26px}
 /* ---- code / pre / file tree ---- */
 pre{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:12px 14px;overflow:auto;font-family:var(--mono);font-size:12px;margin:8px 0;line-height:1.55;color:var(--fg-1)}
 pre.fill{margin:0;max-height:62vh}
+/* remote command output: terminal-ish, scrolls, keeps long lines readable */
+.term{background:#0b0d11;border:1px solid var(--line-2);border-radius:var(--r-s);padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.6;color:#c9d3e0;white-space:pre-wrap;word-break:break-word;max-height:48vh;overflow:auto;margin:0}
+textarea.mono[rows]{min-height:0}
 .filetree{display:flex;gap:14px;align-items:stretch}
 .filetree ul{list-style:none;margin:0;padding:0;min-width:220px;max-width:280px}
 .filetree li{padding:5px 9px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--fg-1);display:flex;justify-content:space-between;gap:8px}

@@ -28,10 +28,11 @@ type Server struct {
 	box        *secret.Box
 	adminToken string
 	npmLatest  *npmCache
+	wake       *waker
 }
 
 func New(st *store.Store, box *secret.Box, adminToken string) *Server {
-	return &Server{st: st, box: box, adminToken: adminToken, npmLatest: newNpmCache()}
+	return &Server{st: st, box: box, adminToken: adminToken, npmLatest: newNpmCache(), wake: newWaker()}
 }
 
 const maxUpload = 50 << 20
@@ -44,6 +45,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent/enroll", s.enroll)
 	mux.HandleFunc("POST /api/agent/sync", s.withMachine(s.sync))
 	mux.HandleFunc("POST /api/agent/report", s.withMachine(s.report))
+	mux.HandleFunc("GET /api/agent/poll", s.withMachine(s.agentPoll))
+	mux.HandleFunc("POST /api/agent/jobs/{id}/result", s.withMachine(s.agentJobResult))
 	mux.HandleFunc("GET /api/agent/versions/{id}/archive", s.withMachine(s.serveArchive))
 	mux.HandleFunc("POST /api/agent/skills/{name}", s.withMachine(s.agentPublishSkill))
 
@@ -57,6 +60,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/machines/{id}/logs", s.withAdmin(s.machineLogs))
 	mux.HandleFunc("GET /api/admin/machines/{id}/jobs", s.withAdmin(s.machineJobs))
 	mux.HandleFunc("POST /api/admin/machines/{id}/jobs", s.withAdmin(s.createJob))
+	mux.HandleFunc("POST /api/admin/machines/{id}/shell", s.withAdmin(s.runShell))
+	mux.HandleFunc("GET /api/admin/jobs/{id}", s.withAdmin(s.getJob))
 	mux.HandleFunc("POST /api/admin/machines/{id}/import-env", s.withAdmin(s.requestImport))
 	mux.HandleFunc("DELETE /api/admin/jobs/{id}", s.withAdmin(s.cancelJob))
 	mux.HandleFunc("GET /api/admin/configs", s.withAdmin(s.allConfigs))
@@ -248,7 +253,7 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Resources = append(resp.Resources, dr)
 	}
-	jobs, err := s.st.QueuedJobs(ctx, m.ID)
+	jobs, err := s.st.ClaimJobs(ctx, m.ID)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -667,7 +672,16 @@ func (s *Server) machineJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, jobs)
 }
 
-var allowedJobs = map[string]bool{protocol.JobNpmUpgrade: true, protocol.JobBrewUpgrade: true, protocol.JobEcho: true}
+var allowedJobs = map[string]bool{protocol.JobNpmUpgrade: true, protocol.JobBrewUpgrade: true, protocol.JobEcho: true, protocol.JobShell: true}
+
+func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
+	j, err := s.st.JobByID(r.Context(), pathID(r))
+	if err != nil {
+		writeErr(w, 404, "job not found")
+		return
+	}
+	writeJSON(w, 200, j)
+}
 
 func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -692,6 +706,7 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.st.Audit(r.Context(), "admin", "job.create", r.PathValue("id"), req.Type+" "+string(req.Payload))
+	s.wake.notify(r.PathValue("id"))
 	writeJSON(w, 200, j)
 }
 

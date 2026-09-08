@@ -11,6 +11,10 @@ type CLITool struct {
 	Path    string `json:"path,omitempty"`
 	Source  string `json:"source"` // npm-global | brew | binary | unknown
 	Package string `json:"package,omitempty"`
+	// Upgrade is the exact command that upgrades this tool on this machine.
+	// Computed locally because only the machine knows its real layout (npm
+	// prefix, nvm dir, Anthropic's native installer, codex standalone, ...).
+	Upgrade string `json:"upgrade,omitempty"`
 }
 
 type Runtime struct {
@@ -120,6 +124,11 @@ type JobResult struct {
 	Output string `json:"output"`
 }
 
+// PollResponse answers the agent's long poll with work to do right now.
+type PollResponse struct {
+	Jobs []Job `json:"jobs"`
+}
+
 type SyncReport struct {
 	Resources []ResourceResult  `json:"resources"`
 	Jobs      []JobResult       `json:"jobs"`
@@ -149,6 +158,7 @@ const (
 	JobNpmUpgrade  = "npm_upgrade"  // {"package":"@openai/codex","version":"latest"}
 	JobBrewUpgrade = "brew_upgrade" // {"formula":"gh"}
 	JobEcho        = "echo"         // {"message":"..."} smoke test
+	JobShell       = "shell"        // {"cmd":"npm i -g x@latest","cwd":"~","timeout_sec":600}
 )
 
 // ---- config collection (client -> server) ----

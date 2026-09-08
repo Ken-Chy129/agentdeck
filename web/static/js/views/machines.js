@@ -1,4 +1,4 @@
-import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill } from '../core.js';
+import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill, runRemote, awaitJob, jobPending } from '../core.js';
 
 const AGENT_TOOLS = ['claude', 'codex', 'gemini', 'hermes', 'opencode', 'cursor-agent', 'gh', 'lark-cli', 'bytedcli'];
 
@@ -10,6 +10,13 @@ export async function machinesView() {
   app.innerHTML = pageHeader({ title: '机器', desc: '每台机器装了 agentdeck CLI，按计划任务每 15 分钟同步一次；这里看到的是它们最近一次上报的状态。', actions: '<button id="enroll">+ 添加机器</button>' }) + `
     <div id="enrollBox"></div>
     <div class="grid">${ms.map(m => machineCard(ov, m, latest)).join('') || empty('还没有机器。点「添加机器」生成一次性注册 token。')}</div>`;
+  // Upgrade straight from the list: no need to open each machine.
+  $$('[data-upall]').forEach(b => b.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const m = ms.find(x => x.id === b.dataset.upall);
+    const cmds = (m.inventory?.tools || []).filter(t => { const lv = t.package ? latest[t.package] : ''; return lv && semverLt(t.version, lv) && upgradeCmd(t); });
+    execModal(m.id, cmds.map(t => upgradeCmd(t)).join(' && '), `升级 ${m.name}：${cmds.map(t => t.name).join(' / ')}`);
+  });
   $('#enroll').onclick = async () => {
     const r = await api('POST', '/api/admin/enroll-tokens', { note: 'from console' });
     $('#enrollBox').innerHTML = `<div class="card"><div class="title" style="font-size:14px">在新机器上执行 <span class="muted small">（token 一次有效）</span></div>
@@ -33,7 +40,7 @@ function machineCard(ov, m, latest) {
     <div class="row mt8 mb12" style="gap:6px">
       <span class="chip">同步 <b>${ago(m.last_seen_at)}</b></span>
       <span class="chip">${counts.skill} skill</span><span class="chip">${counts.config} 配置</span><span class="chip">${counts.env} 变量</span>
-      ${warn ? `<span class="chip ov">${warn} 待同步</span>` : ''}${behind.length ? `<span class="chip ov">${behind.length} CLI 可升级</span>` : ''}
+      ${warn ? `<span class="chip ov">${warn} 待同步</span>` : ''}${behind.length ? `<span class="chip ov">${behind.length} CLI 可升级</span><button class="small" data-upall="${m.id}">升级</button>` : ''}
     </div>
     <table>${tools.map(t => {
       const lv = t.package ? latest[t.package] : ''; const old = lv && semverLt(t.version, lv);
@@ -42,7 +49,7 @@ function machineCard(ov, m, latest) {
   </div>`;
 }
 
-const TABS = [['cli', 'CLI'], ['skills', 'Skill'], ['configs', '配置'], ['env', '环境变量'], ['jobs', '任务'], ['logs', '同步日志']];
+const TABS = [['cli', 'CLI'], ['shell', '终端'], ['skills', 'Skill'], ['configs', '配置'], ['env', '环境变量'], ['jobs', '任务'], ['logs', '同步日志']];
 
 export async function machineDetail(id, tab) {
   tab = TABS.some(t => t[0] === tab) ? tab : 'cli';
@@ -62,13 +69,13 @@ export async function machineDetail(id, tab) {
   $('#del').onclick = async () => { if (await ask('删除机器', `删除 <b>${h(m.name)}</b>？该机器的 token 立刻失效，分发记录一并删除。`, '删除', true)) { await api('DELETE', `/api/admin/machines/${id}`); location.hash = '#/machines'; } };
 
   const body = $('#tabBody');
-  const render = { cli: tabCli, skills: tabSkills, configs: tabConfigs, env: tabEnv, jobs: tabJobs, logs: tabLogs }[tab];
+  const render = { cli: tabCli, shell: tabShell, skills: tabSkills, configs: tabConfigs, env: tabEnv, jobs: tabJobs, logs: tabLogs }[tab];
   await render(body, { m, ov, logs, jobs, id });
 }
 
 function badge(k, ov, m, jobs) {
   let n = 0;
-  if (k === 'jobs') n = jobs.filter(j => j.status === 'queued').length;
+  if (k === 'jobs') n = jobs.filter(j => jobPending(j.status)).length;
   else if (['skills', 'configs', 'env'].includes(k)) { const kind = { skills: 'skill', configs: 'config', env: 'env' }[k]; for (const r of ov.resources) if (r.kind === kind) { const st = syncState(ov, m, r); if (st && st.cls !== 'ok') n++; } }
   return n ? `<span class="pill warn count">${n}</span>` : '';
 }
@@ -77,22 +84,93 @@ function badge(k, ov, m, jobs) {
 async function tabCli(body, { m, id }) {
   const inv = m.inventory || {};
   const latest = await npmLatest((inv.tools || []).map(t => t.package));
-  body.innerHTML = `<div class="card flush"><table><thead><tr><th>工具</th><th>版本</th><th>最新</th><th>来源</th><th>路径</th><th></th></tr></thead><tbody>
+  const behind = (inv.tools || []).filter(t => { const lv = t.package ? latest[t.package] : ''; return lv && semverLt(t.version, lv) && upgradeCmd(t); });
+  body.innerHTML = `<div class="card flush"><div class="row between" style="padding:12px 16px 0">
+  <div class="muted small">${behind.length ? `${behind.length} 个可升级` : '都是最新'}</div>
+  ${behind.length ? `<button class="small" id="upAll">升级全部（${behind.length}）</button>` : ''}</div>
+  <table><thead><tr><th>工具</th><th>版本</th><th>最新</th><th>来源</th><th>路径</th><th></th></tr></thead><tbody>
   ${(inv.tools || []).map(t => { const lv = t.package ? latest[t.package] : ''; const old = lv && semverLt(t.version, lv); const cmd = upgradeCmd(t);
     return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}</td>
-    <td class="right nowrap">${cmd ? `<button class="ghost small" onclick="copyText(${JSON.stringify(cmd)})">复制命令</button>` : ''}
-    ${t.source === 'npm-global' && t.package ? ` <button class="small" data-job="npm_upgrade" data-pkg="${h(t.package)}">下次 sync 升级</button>` : ''}
-    ${t.source === 'brew' ? ` <button class="small" data-job="brew_upgrade" data-formula="${h(t.name)}">下次 sync 升级</button>` : ''}</td></tr>`; }).join('') || emptyRow(6, '尚无 inventory，等第一次 sync')}</tbody></table>
-  <p class="help">「下次 sync 升级」会排一个任务，机器每 15 分钟 sync 时执行；「复制命令」则是自己到机器上跑。</p></div>
+    <td class="right nowrap">${cmd ? `<button class="ghost small" onclick="copyText(${JSON.stringify(cmd)})">复制</button>
+    <button class="small" data-up="${h(cmd)}" data-tool="${h(t.name)}">${old ? '升级' : '重装'}</button>` : ''}</td></tr>`; }).join('') || emptyRow(6, '尚无 inventory，等第一次 sync')}</tbody></table>
+  <p class="help">升级命令由机器自己算出来（认得 npm prefix / nvm / native 安装器 / codex standalone），点「升级」直接在那台机器上跑。</p></div>
   <h2>运行时</h2><div class="card flush"><table><tbody>${(inv.runtimes || []).map(r => `<tr><td class="mono">${h(r.name)}</td><td class="mono">${h(r.version)}</td><td class="mono xs faint">${h(r.path)}</td></tr>`).join('') || emptyRow(3, '无')}</tbody></table>
   <div class="help"><details><summary>npm -g 全部 ${(inv.npm_global || []).length} 个 · brew ${(inv.brew || []).length} 个</summary>
   <div class="cols mt8"><table><tbody>${(inv.npm_global || []).map(p => `<tr><td class="mono small">${h(p.name)}</td><td class="mono small muted right">${h(p.version)}</td></tr>`).join('')}</tbody></table>
   <table><tbody>${(inv.brew || []).map(p => `<tr><td class="mono small">${h(p.name)}</td><td class="mono small muted right">${h(p.version)}</td></tr>`).join('')}</tbody></table></div></details></div></div>`;
-  $$('[data-job]', body).forEach(b => b.onclick = async () => {
-    const payload = b.dataset.job === 'npm_upgrade' ? { package: b.dataset.pkg, version: 'latest' } : { formula: b.dataset.formula };
-    await api('POST', `/api/admin/machines/${id}/jobs`, { type: b.dataset.job, payload }); toast('任务已排队，机器下次 sync 执行'); location.hash = `#/machines/${id}/jobs`;
-  });
+  $$('[data-up]', body).forEach(b => b.onclick = () => execModal(id, b.dataset.up, `升级 ${b.dataset.tool}`));
+  if ($('#upAll', body)) $('#upAll', body).onclick = () => {
+    const cmds = behind.map(t => upgradeCmd(t));
+    execModal(id, cmds.join(' && '), `升级 ${behind.map(t => t.name).join(' / ')}`);
+  };
 }
+
+// ---- remote exec modal ----
+// Runs a command on the machine and streams the result into a modal. Used by
+// the upgrade buttons so you never have to SSH in for a version bump.
+export async function execModal(id, cmd, title) {
+  modal(`<h3>${h(title || '在机器上执行')}</h3>
+    <pre class="mono" style="white-space:pre-wrap">$ ${h(cmd)}</pre>
+    <div id="execOut" class="term muted small">等机器接单…（在线的话几秒内开始）</div>
+    <div class="row right mt12"><button class="ghost" onclick="closeModal()">关闭</button></div>`);
+  const out = $('#execOut');
+  try {
+    let j = await runRemote(id, cmd, { waitSec: 60 });
+    if (jobPending(j.status)) {
+      out.textContent = j.status === 'running' ? '机器已接单，执行中…' : '命令已排队，但机器还没接单。如果它没在 watch 模式，就要等下一次 sync。';
+      j = await awaitJob(j.id) || j;
+    }
+    if (jobPending(j.status)) return;
+    out.classList.remove('muted', 'small');
+    out.textContent = j.result || '(无输出)';
+    if (j.status === 'done') { toast('执行成功'); invalidate(); } else { toast('执行失败，看输出'); }
+  } catch (e) {
+    out.textContent = String(e.message || e);
+  }
+}
+
+// ---- terminal ----
+async function tabShell(body, { m, id }) {
+  const off = online(m.last_seen_at) !== 'on';
+  body.innerHTML = `<div class="card">
+    <div class="row between mb8"><div class="title" style="font-size:14px">在 ${h(m.name)} 上执行命令</div>
+    <span class="chip">login shell · $HOME</span></div>
+    <textarea id="cmd" class="mono" rows="3" placeholder="例如：claude update"></textarea>
+    <div class="row mt8" style="gap:8px">
+      <button id="run">执行 <span class="faint">⌘↵</span></button>
+      <select id="tmo" class="small"><option value="120">2 分钟</option><option value="600" selected>10 分钟</option><option value="1800">30 分钟</option></select>
+      <span class="help" style="margin:0">命令跑在登录 shell 里，跟你自己 SSH 进去一样能找到 nvm / brew。</span>
+    </div>
+    <div class="row mt8" style="gap:6px;flex-wrap:wrap">${SNIPPETS.map(s => `<button class="ghost small" data-snip="${h(s[1])}">${h(s[0])}</button>`).join('')}</div>
+    <pre id="out" class="term mt12">${off ? '这台机器最近没上报，命令会排队等它上来。' : '就绪。'}</pre>
+  </div>`;
+  const runIt = async () => {
+    const cmd = $('#cmd', body).value.trim();
+    if (!cmd) return;
+    const out = $('#out', body);
+    out.textContent = `$ ${cmd}\n执行中…`;
+    $('#run', body).disabled = true;
+    try {
+      let j = await runRemote(id, cmd, { timeoutSec: +$('#tmo', body).value, waitSec: 60 });
+      if (jobPending(j.status)) { out.textContent = `$ ${cmd}\n${j.status === 'running' ? '执行中…' : '已排队，等机器接单…'}`; j = await awaitJob(j.id) || j; }
+      out.textContent = jobPending(j.status) ? `$ ${cmd}\n机器一直没接单：确认它在线，或者装 watch 模式。` : (j.result || '(无输出)');
+      if (j.status === 'done') invalidate();
+    } catch (e) { out.textContent = String(e.message || e); }
+    $('#run', body).disabled = false;
+  };
+  $('#run', body).onclick = runIt;
+  $('#cmd', body).onkeydown = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') runIt(); };
+  $$('[data-snip]', body).forEach(b => b.onclick = () => { $('#cmd', body).value = b.dataset.snip; $('#cmd', body).focus(); });
+}
+
+const SNIPPETS = [
+  ['claude 版本', 'claude --version'],
+  ['codex 版本', 'codex --version'],
+  ['npm -g 列表', 'npm ls -g --depth=0'],
+  ['磁盘', 'df -h | head -5'],
+  ['agentdeck 状态', 'agentdeck status'],
+  ['立即 sync', 'agentdeck sync'],
+];
 
 // ---- shared: assigned resources table ----
 function assignedRows(ov, m, kind, linkOf, extra = () => '') {

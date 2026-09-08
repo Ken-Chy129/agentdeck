@@ -438,8 +438,92 @@ func runJob(ctx context.Context, j protocol.Job) (string, error) {
 			return "", fmt.Errorf("refusing formula %q", p.Formula)
 		}
 		return shell(ctx, "brew", "upgrade", p.Formula)
+	case protocol.JobShell:
+		var p struct {
+			Cmd        string `json:"cmd"`
+			Cwd        string `json:"cwd"`
+			TimeoutSec int    `json:"timeout_sec"`
+		}
+		if err := json.Unmarshal(j.Payload, &p); err != nil {
+			return "", err
+		}
+		return runShell(ctx, p.Cmd, p.Cwd, p.TimeoutSec)
 	}
 	return "", fmt.Errorf("unsupported job type %q", j.Type)
+}
+
+// loginShell returns the shell used for `shell` jobs. A login shell is what
+// makes nvm/brew/pnpm paths resolve the same way they do in an interactive
+// session, which is exactly what you'd get by SSH-ing in yourself.
+func loginShell() string {
+	if s := os.Getenv("AGENTDECK_SHELL"); s != "" {
+		return s
+	}
+	if s := os.Getenv("SHELL"); s != "" {
+		if _, err := os.Stat(s); err == nil {
+			return s
+		}
+	}
+	for _, c := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "/bin/sh"
+}
+
+// runShell executes cmd through a login shell and returns combined output.
+// Output is capped so a runaway command can't blow up the report.
+func runShell(ctx context.Context, cmdStr, cwd string, timeoutSec int) (string, error) {
+	cmdStr = strings.TrimSpace(cmdStr)
+	if cmdStr == "" {
+		return "", fmt.Errorf("empty command")
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 600
+	}
+	if timeoutSec > 3600 {
+		timeoutSec = 3600
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	sh := loginShell()
+	cmd := exec.CommandContext(ctx, sh, "-lc", cmdStr)
+	if cwd != "" {
+		if strings.HasPrefix(cwd, "~") {
+			h, _ := os.UserHomeDir()
+			cwd = filepath.Join(h, strings.TrimPrefix(cwd, "~"))
+		}
+		cmd.Dir = cwd
+	} else {
+		cmd.Dir, _ = os.UserHomeDir()
+	}
+	cmd.Env = append(os.Environ(), "AGENTDECK_JOB=1", "CI=1", "TERM=dumb", "NO_COLOR=1")
+	cmd.Stdin = nil
+	isolate(cmd)
+
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	start := time.Now()
+	err := cmd.Run()
+	out := buf.String()
+	if len(out) > 200<<10 {
+		out = out[:200<<10] + "\n…(output truncated)"
+	}
+	head := fmt.Sprintf("$ %s\n", cmdStr)
+	code := -1
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
+	tail := fmt.Sprintf("\n[exit %d · %s · %s]", code, time.Since(start).Round(time.Millisecond), sh)
+	if ctx.Err() == context.DeadlineExceeded {
+		return head + out + fmt.Sprintf("\n[timed out after %ds]", timeoutSec), fmt.Errorf("timed out after %ds", timeoutSec)
+	}
+	if err != nil {
+		return head + out + tail, err
+	}
+	return head + out + tail, nil
 }
 
 func shell(ctx context.Context, name string, args ...string) (string, error) {

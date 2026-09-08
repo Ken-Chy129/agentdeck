@@ -4,12 +4,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Ken-Chy129/agentdeck/internal/bundle"
 	"github.com/Ken-Chy129/agentdeck/internal/inventory"
@@ -22,6 +26,7 @@ const usage = `agentdeck %s — sync skills & report CLI inventory to your Agent
 usage:
   agentdeck login <server-url> <enroll-token> [--name NAME]   enroll this machine
   agentdeck sync [--dry-run] [--no-inventory] [-q]            reconcile skills, run queued jobs
+  agentdeck watch [--sync-every MIN]                          stay online: run console commands within seconds
   agentdeck status                                            show lock vs local state
   agentdeck push <dir>... [--note TEXT] [--no-assign]         publish local skill dir(s) as new version
   agentdeck inventory [--json]                                print what would be reported
@@ -42,6 +47,8 @@ func main() {
 		err = cmdLogin(ctx, os.Args[2:])
 	case "sync":
 		err = cmdSync(ctx, os.Args[2:])
+	case "watch":
+		err = cmdWatch(ctx, os.Args[2:])
 	case "status":
 		err = cmdStatus()
 	case "push":
@@ -106,6 +113,34 @@ func cmdLogin(ctx context.Context, args []string) error {
 }
 
 func cmdSync(ctx context.Context, args []string) error {
+	return cmdSyncRun(ctx, args)
+}
+
+func cmdWatch(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	every := fs.Int("sync-every", 15, "minutes between full syncs (0 = only run jobs)")
+	quiet := fs.Bool("q", false, "quiet")
+	fs.Parse(reorder(args))
+	c, err := sync.LoadConfig()
+	if err != nil {
+		return err
+	}
+	logf := func(f string, a ...any) {
+		fmt.Printf("%s "+f+"\n", append([]any{time.Now().Format("15:04:05")}, a...)...)
+	}
+	if *quiet {
+		logf = func(string, ...any) {}
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err = sync.Watch(ctx, c, sync.WatchOptions{SyncEvery: time.Duration(*every) * time.Minute, Log: logf})
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+func cmdSyncRun(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
 	dry := fs.Bool("dry-run", false, "show what would change")
 	noInv := fs.Bool("no-inventory", false, "skip CLI inventory collection")

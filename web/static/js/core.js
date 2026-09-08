@@ -163,7 +163,30 @@ export function syncState(ov, m, res) {
 }
 
 export const pill = (st) => st ? `<span class="pill ${st.cls}" title="${h(st.detail || '')}">${h(st.text)}</span>` : '';
-export const upgradeCmd = (t) => t.source === 'npm-global' && t.package ? `npm i -g ${t.package}@latest` : t.source === 'brew' ? `brew upgrade ${t.name}` : t.source === 'native' && t.name === 'claude' ? 'claude update' : '';
+// The agent computes the exact command for its own layout (npm prefix, nvm,
+// native installer, codex standalone). Fall back to a guess for machines that
+// haven't reported since the upgrade-aware agent shipped.
+export const upgradeCmd = (t) => t.upgrade || (t.source === 'npm-global' && t.package ? `npm i -g ${t.package}@latest` : t.source === 'brew' ? `brew upgrade ${t.name}` : t.source === 'native' && t.name === 'claude' ? 'claude update' : t.source === 'standalone' && t.name === 'codex' ? 'codex update' : '');
+
+// ---- remote shell ----
+// Queue a command on a machine and wait for its result. The server holds the
+// request while the machine's long poll picks it up, so this usually returns
+// in a couple of seconds.
+export async function runRemote(machineID, cmd, { timeoutSec = 600, waitSec = 60 } = {}) {
+  return api('POST', `/api/admin/machines/${machineID}/shell`, { cmd, timeout_sec: timeoutSec, wait_sec: waitSec });
+}
+
+// Poll a job until it reaches a terminal state. 'running' means the machine
+// picked it up and is still working, so we keep waiting.
+export async function awaitJob(jobID, { tries = 60, everyMs = 2000 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const j = await api('GET', `/api/admin/jobs/${jobID}`);
+    if (['done', 'failed', 'cancelled'].includes(j.status)) return j;
+    await new Promise(r => setTimeout(r, everyMs));
+  }
+  return null;
+}
+export const jobPending = (s) => s === 'queued' || s === 'running';
 
 // ---- page scaffolding ----
 export const crumb = (href, label) => `<a class="crumb" href="${href}">← ${h(label)}</a>`;
@@ -172,4 +195,4 @@ export function pageHeader({ title, sub, desc, actions = '', mono = false }) {
 }
 export const empty = (html) => `<div class="empty">${html}</div>`;
 export const emptyRow = (cols, html) => `<tr><td colspan="${cols}"><div class="empty">${html}</div></td></tr>`;
-export const statusPill = (s) => `<span class="pill ${s === 'done' ? 'ok' : s === 'failed' ? 'bad' : s === 'queued' ? 'warn' : ''}">${h(s)}</span>`;
+export const statusPill = (s) => `<span class="pill ${s === 'done' ? 'ok' : s === 'failed' ? 'bad' : (s === 'queued' || s === 'running') ? 'warn' : ''}">${h(s)}</span>`;

@@ -39,11 +39,17 @@ Put it behind Caddy/nginx with TLS (see `deploy/Caddyfile.snippet`). Env: `AGENT
 go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest   # or grab a binary from dist/
 agentdeck login https://deck.example.com <enroll-token> --name mbp
 agentdeck sync                     # once
-agentdeck install-schedule         # every 15 min via launchd / systemd --user
+agentdeck install-schedule --watch # stay online: console commands run in seconds
+agentdeck install-schedule         # or timer-only: sync every 15 min
 agentdeck push ~/.agents/skills/my-skill --note "tweak"
 agentdeck status
 agentdeck inventory
 ```
+
+`--watch` keeps the CLI resident and long-polls the server, so a command typed in
+the console's 终端 tab (or an upgrade button) runs within a couple of seconds. The
+machine always dials out, so this works from boxes the server can't reach. On Linux
+run `loginctl enable-linger $USER` so the unit survives logout.
 
 Config: `~/.config/agentdeck/config.json` (0600). Lockfile: `~/.agents/skills/.agentdeck-lock.json`.
 

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -47,6 +48,19 @@ func main() {
 	api.New(st, box, adminToken).Register(mux)
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+
+	// A machine can die mid-job (reboot, network drop). Don't leave those jobs
+	// stuck as 'running' where the console would wait on them forever.
+	if err := st.RequeueStaleJobs(context.Background(), 2*time.Hour); err != nil {
+		log.Printf("stale job cleanup: %v", err)
+	}
+	go func() {
+		for range time.Tick(30 * time.Minute) {
+			if err := st.RequeueStaleJobs(context.Background(), 2*time.Hour); err != nil {
+				log.Printf("stale job cleanup: %v", err)
+			}
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:              *addr,
