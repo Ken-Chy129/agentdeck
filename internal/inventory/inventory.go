@@ -65,6 +65,15 @@ func Collect(ctx context.Context) *protocol.Inventory {
 	inv := &protocol.Inventory{OS: runtime.GOOS, Arch: runtime.GOARCH}
 	inv.Hostname, _ = os.Hostname()
 
+	// Resolve tools using the PATH of an interactive login shell, not whatever
+	// PATH systemd/launchd handed us. Otherwise we'd report a different version
+	// than the one you actually get when you type `codex` in a terminal.
+	if p := loginPath(ctx); p != "" {
+		old := os.Getenv("PATH")
+		os.Setenv("PATH", p)
+		defer os.Setenv("PATH", old)
+	}
+
 	for _, r := range runtimes {
 		p, err := exec.LookPath(r.bin)
 		if err != nil {
@@ -156,6 +165,29 @@ func firstVersion(s string) string {
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return lines[len(lines)-1]
+}
+
+// loginPath asks a login shell for its PATH. Under systemd/launchd we inherit a
+// frozen PATH captured at install time, which can resolve to an older copy of a
+// tool than the one you'd get interactively — exactly the kind of drift this
+// console is supposed to surface, not create.
+func loginPath(ctx context.Context) string {
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		return ""
+	}
+	if _, err := os.Stat(sh); err != nil {
+		return ""
+	}
+	out, err := run(ctx, sh, "-lc", "printf %s \"$PATH\"")
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(lastLine(out))
+	if !strings.Contains(p, string(os.PathListSeparator)) {
+		return ""
+	}
+	return p
 }
 
 // npmPrefixOf recovers the install prefix from a resolved binary path, e.g.
