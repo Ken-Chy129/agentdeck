@@ -240,24 +240,22 @@ func backup(c *Config, name string) (string, error) {
 	return dst, set.WriteDir(dst)
 }
 
-// Relink makes sure every skill dir in SkillsDir has a symlink in each LinkDir
-// (e.g. ~/.claude/skills/<name> -> ../../.agents/skills/<name>). Existing real
-// directories or foreign symlinks in LinkDirs are left untouched.
+// Relink makes sure every *managed* skill dir in SkillsDir has a symlink in each
+// LinkDir (e.g. ~/.claude/skills/<name> -> ../../.agents/skills/<name>). Existing
+// real directories or foreign symlinks in LinkDirs are left untouched; unmanaged
+// skills are not linked.
 func Relink(c *Config) error {
-	ents, err := os.ReadDir(c.SkillsDir)
-	if err != nil {
-		return err
-	}
+	lock := c.LoadLock()
 	for _, ld := range c.LinkDirs {
 		if err := os.MkdirAll(ld, 0o755); err != nil {
 			return err
 		}
-		for _, e := range ents {
-			if strings.HasPrefix(e.Name(), ".") || !e.IsDir() {
+		for name := range lock.Skills {
+			target := filepath.Join(c.SkillsDir, name)
+			if fi, err := os.Stat(target); err != nil || !fi.IsDir() {
 				continue
 			}
-			target := filepath.Join(c.SkillsDir, e.Name())
-			link := filepath.Join(ld, e.Name())
+			link := filepath.Join(ld, name)
 			rel, err := filepath.Rel(ld, target)
 			if err != nil {
 				rel = target
