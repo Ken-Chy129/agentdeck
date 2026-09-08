@@ -1,10 +1,10 @@
 services:
-  skillhub:
+  agentdeck:
     build: ..
-    image: skillhub:latest
-    container_name: skillhub
+    image: agentdeck:latest
+    container_name: agentdeck
     restart: unless-stopped
     ports:
       - "127.0.0.1:8480:8480"
     volumes:
-      - /opt/skillhub/data:/data
+      - /opt/agentdeck/data:/data

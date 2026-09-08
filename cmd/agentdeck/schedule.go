@@ -13,7 +13,7 @@ import (
 
 func nowStr() string { return time.Now().UTC().Format(time.RFC3339) }
 
-const launchdLabel = "dev.kenchy.skillhub.sync"
+const launchdLabel = "dev.kenchy.agentdeck.sync"
 
 func launchdPlist() string {
 	h, _ := os.UserHomeDir()
@@ -30,7 +30,7 @@ func cmdInstallSchedule(args []string) error {
 	}
 	self, _ = filepath.EvalSymlinks(self)
 	h, _ := os.UserHomeDir()
-	logDir := filepath.Join(h, ".config", "skillhub")
+	logDir := filepath.Join(h, ".config", "agentdeck")
 	os.MkdirAll(logDir, 0o700)
 	// Capture the interactive PATH so launchd/systemd can find nvm's npm, brew, etc.
 	pathEnv := os.Getenv("PATH")
@@ -63,18 +63,18 @@ func cmdInstallSchedule(args []string) error {
 	case "linux":
 		unitDir := filepath.Join(h, ".config", "systemd", "user")
 		os.MkdirAll(unitDir, 0o755)
-		svc := fmt.Sprintf("[Unit]\nDescription=SkillHub sync\n\n[Service]\nType=oneshot\nEnvironment=PATH=%s\nExecStart=%s sync -q\n", pathEnv, self)
-		tmr := fmt.Sprintf("[Unit]\nDescription=SkillHub sync timer\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=%dmin\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n", *every)
-		os.WriteFile(filepath.Join(unitDir, "skillhub-sync.service"), []byte(svc), 0o644)
-		os.WriteFile(filepath.Join(unitDir, "skillhub-sync.timer"), []byte(tmr), 0o644)
-		for _, a := range [][]string{{"daemon-reload"}, {"enable", "--now", "skillhub-sync.timer"}} {
+		svc := fmt.Sprintf("[Unit]\nDescription=AgentDeck sync\n\n[Service]\nType=oneshot\nEnvironment=PATH=%s\nExecStart=%s sync -q\n", pathEnv, self)
+		tmr := fmt.Sprintf("[Unit]\nDescription=AgentDeck sync timer\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=%dmin\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n", *every)
+		os.WriteFile(filepath.Join(unitDir, "agentdeck-sync.service"), []byte(svc), 0o644)
+		os.WriteFile(filepath.Join(unitDir, "agentdeck-sync.timer"), []byte(tmr), 0o644)
+		for _, a := range [][]string{{"daemon-reload"}, {"enable", "--now", "agentdeck-sync.timer"}} {
 			if out, err := exec.Command("systemctl", append([]string{"--user"}, a...)...).CombinedOutput(); err != nil {
 				return fmt.Errorf("systemctl --user %s: %v: %s", strings.Join(a, " "), err, out)
 			}
 		}
-		fmt.Printf("installed systemd user timer skillhub-sync.timer (every %d min)\n", *every)
+		fmt.Printf("installed systemd user timer agentdeck-sync.timer (every %d min)\n", *every)
 	default:
-		return fmt.Errorf("scheduling not supported on %s; run `skillhub sync` from your own scheduler", runtime.GOOS)
+		return fmt.Errorf("scheduling not supported on %s; run `agentdeck sync` from your own scheduler", runtime.GOOS)
 	}
 	return nil
 }
@@ -86,10 +86,10 @@ func cmdUninstallSchedule() error {
 		os.Remove(launchdPlist())
 		fmt.Println("removed launchd agent")
 	case "linux":
-		exec.Command("systemctl", "--user", "disable", "--now", "skillhub-sync.timer").Run()
+		exec.Command("systemctl", "--user", "disable", "--now", "agentdeck-sync.timer").Run()
 		h, _ := os.UserHomeDir()
-		os.Remove(filepath.Join(h, ".config", "systemd", "user", "skillhub-sync.service"))
-		os.Remove(filepath.Join(h, ".config", "systemd", "user", "skillhub-sync.timer"))
+		os.Remove(filepath.Join(h, ".config", "systemd", "user", "agentdeck-sync.service"))
+		os.Remove(filepath.Join(h, ".config", "systemd", "user", "agentdeck-sync.timer"))
 		fmt.Println("removed systemd user timer")
 	}
 	return nil

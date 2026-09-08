@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ken-Chy129/skillhub/internal/bundle"
-	"github.com/Ken-Chy129/skillhub/internal/protocol"
-	"github.com/Ken-Chy129/skillhub/internal/store"
+	"github.com/Ken-Chy129/agentdeck/internal/bundle"
+	"github.com/Ken-Chy129/agentdeck/internal/protocol"
+	"github.com/Ken-Chy129/agentdeck/internal/store"
 )
 
 type Server struct {

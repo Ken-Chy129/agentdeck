@@ -134,7 +134,7 @@ type Machine struct {
 }
 
 func (s *Store) CreateEnrollToken(ctx context.Context, note string) (string, error) {
-	tok := NewToken("shenroll")
+	tok := NewToken("adenroll")
 	_, err := s.db.ExecContext(ctx, `INSERT INTO enroll_tokens(token_hash,note,created_at) VALUES(?,?,?)`, HashToken(tok), note, now())
 	return tok, err
 }
@@ -153,7 +153,7 @@ func (s *Store) Enroll(ctx context.Context, enrollToken, name, os, arch, hostnam
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, "", errors.New("invalid or already used enroll token")
 	}
-	mtok := NewToken("shm")
+	mtok := NewToken("adm")
 	m := &Machine{ID: NewToken("m")[2:14], Name: name, OS: os, Arch: arch, Hostname: hostname, CreatedAt: now()}
 	_, err = tx.ExecContext(ctx, `INSERT INTO machines(id,name,token_hash,os,arch,hostname,created_at) VALUES(?,?,?,?,?,?,?)`,
 		m.ID, m.Name, HashToken(mtok), os, arch, hostname, m.CreatedAt)

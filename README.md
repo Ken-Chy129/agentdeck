@@ -1,21 +1,22 @@
-# SkillHub
+# AgentDeck
 
-Personal control plane for my coding-agent setup across machines: a web console on my VPS
-plus a tiny `skillhub` CLI on every machine. Machines pull; the server never needs to reach them.
+Personal control plane for my coding-agent setup across machines — skills today, MCP servers,
+CLI configs and credentials next: a web console on my VPS
+plus a tiny `agentdeck` CLI on every machine. Machines pull; the server never needs to reach them.
 
 ```
-browser ──▶ skillhubd (Go, SQLite, embedded web UI)  ◀── HTTPS ── skillhub sync (each machine)
+browser ──▶ agentdeckd (Go, SQLite, embedded web UI)  ◀── HTTPS ── agentdeck sync (each machine)
               skills · versions · machines · assignments · jobs · sync logs
 ```
 
 ## What it does
 
 - **Skill library**: versioned, content-addressed skill bundles. Create/edit in the browser,
-  upload a tar.gz, or `skillhub push ~/.agents/skills/foo` from any machine.
+  upload a tar.gz, or `agentdeck push ~/.agents/skills/foo` from any machine.
 - **Distribution**: assign skills to machines (per-machine page or the matrix view).
-  `skillhub sync` installs/updates/removes so `~/.agents/skills/` matches the server, then
+  `agentdeck sync` installs/updates/removes so `~/.agents/skills/` matches the server, then
   symlinks into `~/.claude/skills/`. Server wins; local edits are backed up to
-  `~/.agents/skills/.skillhub-backup/` first. Skills that are not assigned are never touched.
+  `~/.agents/skills/.agentdeck-backup/` first. Skills that are not assigned are never touched.
 - **CLI inventory**: each sync reports node/npm/brew/go/… versions and agent CLIs
   (claude, codex, gemini, …) with their install source and path. The console compares against
   npm and shows what is behind, with a copyable upgrade command.
@@ -26,31 +27,31 @@ browser ──▶ skillhubd (Go, SQLite, embedded web UI)  ◀── HTTPS ─�
 
 ```sh
 docker compose -f deploy/docker-compose.yml up -d --build   # listens on 127.0.0.1:8480
-cat /opt/skillhub/data/admin_token                          # paste into the web login
+cat /opt/agentdeck/data/admin_token                          # paste into the web login
 ```
 
-Put it behind Caddy/nginx with TLS (see `deploy/Caddyfile.snippet`). Env: `SKILLHUB_ADDR`,
-`SKILLHUB_DATA`, `SKILLHUB_ADMIN_TOKEN` (optional; otherwise generated into `data/admin_token`).
+Put it behind Caddy/nginx with TLS (see `deploy/Caddyfile.snippet`). Env: `AGENTDECK_ADDR`,
+`AGENTDECK_DATA`, `AGENTDECK_ADMIN_TOKEN` (optional; otherwise generated into `data/admin_token`).
 
 ## Machine
 
 ```sh
-go install github.com/Ken-Chy129/skillhub/cmd/skillhub@latest   # or grab a binary from dist/
-skillhub login https://skillhub.example.com <enroll-token> --name mbp
-skillhub sync                     # once
-skillhub install-schedule         # every 15 min via launchd / systemd --user
-skillhub push ~/.agents/skills/my-skill --note "tweak"
-skillhub status
-skillhub inventory
+go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest   # or grab a binary from dist/
+agentdeck login https://deck.example.com <enroll-token> --name mbp
+agentdeck sync                     # once
+agentdeck install-schedule         # every 15 min via launchd / systemd --user
+agentdeck push ~/.agents/skills/my-skill --note "tweak"
+agentdeck status
+agentdeck inventory
 ```
 
-Config: `~/.config/skillhub/config.json` (0600). Lockfile: `~/.agents/skills/.skillhub-lock.json`.
+Config: `~/.config/agentdeck/config.json` (0600). Lockfile: `~/.agents/skills/.agentdeck-lock.json`.
 
 ## Layout
 
 ```
-cmd/skillhubd        server entrypoint
-cmd/skillhub         machine CLI
+cmd/agentdeckd        server entrypoint
+cmd/agentdeck         machine CLI
 internal/api         HTTP handlers (/api/admin/* admin token, /api/agent/* machine token)
 internal/store       SQLite schema + queries
 internal/bundle      tar.gz pack/unpack, stable digest, safe dir swap

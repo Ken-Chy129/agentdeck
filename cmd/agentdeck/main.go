@@ -1,4 +1,4 @@
-// skillhub is the per-machine CLI.
+// agentdeck is the per-machine CLI.
 package main
 
 import (
@@ -11,23 +11,23 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Ken-Chy129/skillhub/internal/bundle"
-	"github.com/Ken-Chy129/skillhub/internal/inventory"
-	"github.com/Ken-Chy129/skillhub/internal/protocol"
-	"github.com/Ken-Chy129/skillhub/internal/sync"
+	"github.com/Ken-Chy129/agentdeck/internal/bundle"
+	"github.com/Ken-Chy129/agentdeck/internal/inventory"
+	"github.com/Ken-Chy129/agentdeck/internal/protocol"
+	"github.com/Ken-Chy129/agentdeck/internal/sync"
 )
 
-const usage = `skillhub %s — sync skills & report CLI inventory to your SkillHub server
+const usage = `agentdeck %s — sync skills & report CLI inventory to your AgentDeck server
 
 usage:
-  skillhub login <server-url> <enroll-token> [--name NAME]   enroll this machine
-  skillhub sync [--dry-run] [--no-inventory] [-q]            reconcile skills, run queued jobs
-  skillhub status                                            show lock vs local state
-  skillhub push <dir>... [--note TEXT] [--no-assign]         publish local skill dir(s) as new version
-  skillhub inventory [--json]                                print what would be reported
-  skillhub relink                                            rebuild agent-dir symlinks
-  skillhub install-schedule [--every MIN] | uninstall-schedule   launchd (macOS) / systemd --user (linux) timer
-  skillhub config                                            print config path & contents
+  agentdeck login <server-url> <enroll-token> [--name NAME]   enroll this machine
+  agentdeck sync [--dry-run] [--no-inventory] [-q]            reconcile skills, run queued jobs
+  agentdeck status                                            show lock vs local state
+  agentdeck push <dir>... [--note TEXT] [--no-assign]         publish local skill dir(s) as new version
+  agentdeck inventory [--json]                                print what would be reported
+  agentdeck relink                                            rebuild agent-dir symlinks
+  agentdeck install-schedule [--every MIN] | uninstall-schedule   launchd (macOS) / systemd --user (linux) timer
+  agentdeck config                                            print config path & contents
 `
 
 func main() {
@@ -68,7 +68,7 @@ func main() {
 			fmt.Println(string(out))
 		}
 	case "version", "--version", "-v":
-		fmt.Println("skillhub " + sync.Version)
+		fmt.Println("agentdeck " + sync.Version)
 	default:
 		fmt.Printf(usage, sync.Version)
 		os.Exit(2)
@@ -85,7 +85,7 @@ func cmdLogin(ctx context.Context, args []string) error {
 	skillsDir := fs.String("skills-dir", "", "canonical skills dir (default ~/.agents/skills)")
 	fs.Parse(reorder(args))
 	if fs.NArg() < 2 {
-		return fmt.Errorf("usage: skillhub login <server-url> <enroll-token> [--name NAME]")
+		return fmt.Errorf("usage: agentdeck login <server-url> <enroll-token> [--name NAME]")
 	}
 	server, tok := strings.TrimRight(fs.Arg(0), "/"), fs.Arg(1)
 	host, _ := os.Hostname()
@@ -101,7 +101,7 @@ func cmdLogin(ctx context.Context, args []string) error {
 	if err := c.Save(); err != nil {
 		return err
 	}
-	fmt.Printf("enrolled as %q (%s) at %s\nconfig: %s\nnext: skillhub sync\n", resp.Name, resp.MachineID, server, sync.ConfigPath())
+	fmt.Printf("enrolled as %q (%s) at %s\nconfig: %s\nnext: agentdeck sync\n", resp.Name, resp.MachineID, server, sync.ConfigPath())
 	return nil
 }
 
@@ -196,7 +196,7 @@ func cmdPush(ctx context.Context, args []string) error {
 	noAssign := fs.Bool("no-assign", false, "do not assign to this machine")
 	fs.Parse(reorder(args))
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: skillhub push <dir>...")
+		return fmt.Errorf("usage: agentdeck push <dir>...")
 	}
 	c, err := sync.LoadConfig()
 	if err != nil {

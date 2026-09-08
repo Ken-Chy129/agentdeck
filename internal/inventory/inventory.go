@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ken-Chy129/skillhub/internal/protocol"
+	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
 // Known agent CLIs and the npm package that provides them.
@@ -29,7 +29,7 @@ var knownTools = []struct{ bin, pkg string }{
 	{"opencode", "opencode-ai"},
 	{"aider", ""},
 	{"gh", ""},
-	{"skillhub", ""},
+	{"agentdeck", ""},
 }
 
 var runtimes = []struct {
@@ -169,7 +169,7 @@ func detectAgents() []protocol.Agent {
 	return out
 }
 
-// Summary renders a short human-readable view (used by `skillhub inventory`).
+// Summary renders a short human-readable view (used by `agentdeck inventory`).
 func Summary(inv *protocol.Inventory) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s/%s\n", inv.Hostname, inv.OS, inv.Arch)

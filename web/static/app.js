@@ -1,10 +1,10 @@
-/* SkillHub console — vanilla JS, no build step. */
+/* AgentDeck console — vanilla JS, no build step. */
 const $ = (s, el = document) => el.querySelector(s);
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const app = $('#app');
 
 // ---------- auth + api ----------
-const TOKEN_KEY = 'skillhub_admin_token';
+const TOKEN_KEY = 'agentdeck_admin_token';
 let token = localStorage.getItem(TOKEN_KEY) || '';
 async function api(method, path, body, raw) {
   const opt = { method, headers: { Authorization: 'Bearer ' + token } };
@@ -26,9 +26,9 @@ function toast(msg, bad) {
 const fail = (e) => toast(e.message || String(e), true);
 
 function showLogin() {
-  app.innerHTML = `<div class="card login"><h1>登录 SkillHub</h1>
+  app.innerHTML = `<div class="card login"><h1>登录 AgentDeck</h1>
     <p class="muted">输入服务端 data/admin_token 里的管理 token。</p>
-    <input id="tok" type="password" placeholder="shadmin_…" style="width:100%">
+    <input id="tok" type="password" placeholder="adadmin_…" style="width:100%">
     <div class="row" style="margin-top:12px"><button id="go">进入</button></div></div>`;
   $('#go').onclick = async () => {
     token = $('#tok').value.trim(); localStorage.setItem(TOKEN_KEY, token);
@@ -86,9 +86,9 @@ async function machines() {
     const r = await api('POST', '/api/admin/enroll-tokens', { note: 'from console' });
     const base = location.origin;
     $('#enrollBox').innerHTML = `<div class="card"><b>在新机器上执行</b>（token 一次有效）：
-      <pre>skillhub login ${base} ${r.enroll_token} --name $(hostname -s)
-skillhub sync</pre>
-      <details><summary>还没装 skillhub CLI？</summary><pre>go install github.com/Ken-Chy129/skillhub/cmd/skillhub@latest</pre>
+      <pre>agentdeck login ${base} ${r.enroll_token} --name $(hostname -s)
+agentdeck sync</pre>
+      <details><summary>还没装 agentdeck CLI？</summary><pre>go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest</pre>
       <p class="muted small">或从 GitHub Releases 下载对应平台二进制放进 PATH。</p></details></div>`;
   };
 }
@@ -172,7 +172,7 @@ async function skills() {
   app.innerHTML = `<div class="row" style="justify-content:space-between"><h1>Skill 库</h1>
    <div class="row"><button class="ghost" id="upload">上传 tar.gz</button><button id="create">+ 新建 skill</button></div></div>
    <div class="card"><table><tr><th>名称</th><th>描述</th><th>版本</th><th>大小</th><th>分发到</th><th>更新</th></tr>
-   ${ks.map(k => `<tr><td><a href="#/skills/${h(k.name)}" class="mono">${h(k.name)}</a></td><td class="muted small">${h(k.description)}</td><td>v${k.current_version}</td><td class="muted small">${kb(k.current_size)}</td><td>${k.machine_count} 台</td><td class="muted small">${ago(k.updated_at)}</td></tr>`).join('') || '<tr><td class="muted">还没有 skill。新建一个，或在机器上 <code>skillhub push ~/.agents/skills/xxx</code>。</td></tr>'}</table></div>
+   ${ks.map(k => `<tr><td><a href="#/skills/${h(k.name)}" class="mono">${h(k.name)}</a></td><td class="muted small">${h(k.description)}</td><td>v${k.current_version}</td><td class="muted small">${kb(k.current_size)}</td><td>${k.machine_count} 台</td><td class="muted small">${ago(k.updated_at)}</td></tr>`).join('') || '<tr><td class="muted">还没有 skill。新建一个，或在机器上 <code>agentdeck push ~/.agents/skills/xxx</code>。</td></tr>'}</table></div>
    <input type="file" id="file" accept=".tgz,.tar.gz,application/gzip" hidden>`;
   $('#create').onclick = () => editor(null);
   $('#upload').onclick = () => $('#file').click();

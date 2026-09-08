@@ -1,4 +1,4 @@
-module github.com/Ken-Chy129/skillhub
+module github.com/Ken-Chy129/agentdeck
 
 go 1.25.0
 

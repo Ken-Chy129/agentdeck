@@ -1,4 +1,4 @@
-// skillhubd is the server: API + embedded web console + SQLite.
+// agentdeckd is the server: API + embedded web console + SQLite.
 package main
 
 import (
@@ -13,25 +13,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ken-Chy129/skillhub/internal/api"
-	"github.com/Ken-Chy129/skillhub/internal/store"
-	"github.com/Ken-Chy129/skillhub/web"
+	"github.com/Ken-Chy129/agentdeck/internal/api"
+	"github.com/Ken-Chy129/agentdeck/internal/store"
+	"github.com/Ken-Chy129/agentdeck/web"
 )
 
 func main() {
-	addr := flag.String("addr", envOr("SKILLHUB_ADDR", "127.0.0.1:8480"), "listen address")
-	dataDir := flag.String("data", envOr("SKILLHUB_DATA", "./data"), "data directory")
+	addr := flag.String("addr", envOr("AGENTDECK_ADDR", "127.0.0.1:8480"), "listen address")
+	dataDir := flag.String("data", envOr("AGENTDECK_DATA", "./data"), "data directory")
 	flag.Parse()
 
 	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	adminToken := strings.TrimSpace(os.Getenv("SKILLHUB_ADMIN_TOKEN"))
+	adminToken := strings.TrimSpace(os.Getenv("AGENTDECK_ADMIN_TOKEN"))
 	if adminToken == "" {
 		adminToken = loadOrCreateToken(filepath.Join(*dataDir, "admin_token"))
 	}
 
-	st, err := store.Open(filepath.Join(*dataDir, "skillhub.db"))
+	st, err := store.Open(filepath.Join(*dataDir, "agentdeck.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func main() {
 		ReadTimeout:       5 * time.Minute,
 		WriteTimeout:      5 * time.Minute,
 	}
-	log.Printf("skillhubd listening on http://%s (data=%s)", *addr, *dataDir)
+	log.Printf("agentdeckd listening on http://%s (data=%s)", *addr, *dataDir)
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -66,7 +66,7 @@ func loadOrCreateToken(path string) string {
 	}
 	buf := make([]byte, 24)
 	rand.Read(buf)
-	tok := "shadmin_" + hex.EncodeToString(buf)
+	tok := "adadmin_" + hex.EncodeToString(buf)
 	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
 		log.Fatal(err)
 	}

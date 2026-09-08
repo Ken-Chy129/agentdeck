@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ken-Chy129/skillhub/internal/protocol"
+	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
 const Version = "0.1.0"
 
-// Config lives at ~/.config/skillhub/config.json (0600).
+// Config lives at ~/.config/agentdeck/config.json (0600).
 type Config struct {
 	Server       string   `json:"server"`
 	MachineID    string   `json:"machine_id"`
@@ -30,7 +30,7 @@ type Config struct {
 	LinkDirs     []string `json:"link_dirs,omitempty"` // agent dirs that get symlinks, default ~/.claude/skills
 }
 
-// Lock lives next to the skills dir: ~/.agents/skills/.skillhub-lock.json.
+// Lock lives next to the skills dir: ~/.agents/skills/.agentdeck-lock.json.
 type Lock struct {
 	Skills map[string]LockEntry `json:"skills"`
 }
@@ -45,20 +45,20 @@ type LockEntry struct {
 func home() string { h, _ := os.UserHomeDir(); return h }
 
 func ConfigPath() string {
-	if p := os.Getenv("SKILLHUB_CONFIG"); p != "" {
+	if p := os.Getenv("AGENTDECK_CONFIG"); p != "" {
 		return p
 	}
 	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "skillhub", "config.json")
+		return filepath.Join(x, "agentdeck", "config.json")
 	}
-	return filepath.Join(home(), ".config", "skillhub", "config.json")
+	return filepath.Join(home(), ".config", "agentdeck", "config.json")
 }
 
 func LoadConfig() (*Config, error) {
 	b, err := os.ReadFile(ConfigPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, errors.New("not logged in: run `skillhub login <server> <enroll-token>` first")
+			return nil, errors.New("not logged in: run `agentdeck login <server> <enroll-token>` first")
 		}
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (c *Config) Save() error {
 	return os.WriteFile(p, append(b, '\n'), 0o600)
 }
 
-func (c *Config) LockPath() string { return filepath.Join(c.SkillsDir, ".skillhub-lock.json") }
+func (c *Config) LockPath() string { return filepath.Join(c.SkillsDir, ".agentdeck-lock.json") }
 
 func (c *Config) LoadLock() *Lock {
 	l := &Lock{Skills: map[string]LockEntry{}}
@@ -132,7 +132,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, ct
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
 	}
-	req.Header.Set("User-Agent", "skillhub/"+Version)
+	req.Header.Set("User-Agent", "agentdeck/"+Version)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

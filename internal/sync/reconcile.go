@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ken-Chy129/skillhub/internal/bundle"
-	"github.com/Ken-Chy129/skillhub/internal/inventory"
-	"github.com/Ken-Chy129/skillhub/internal/protocol"
+	"github.com/Ken-Chy129/agentdeck/internal/bundle"
+	"github.com/Ken-Chy129/agentdeck/internal/inventory"
+	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
 // ScanLocal digests every skill directory under SkillsDir.
@@ -53,7 +53,7 @@ type Options struct {
 }
 
 // Run performs one full sync. Server state wins; local edits to managed skills
-// are moved to <SkillsDir>/.skillhub-backup/<name>-<ts>/ before being replaced.
+// are moved to <SkillsDir>/.agentdeck-backup/<name>-<ts>/ before being replaced.
 func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, error) {
 	logf := opt.Log
 	if logf == nil {
@@ -228,7 +228,7 @@ func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func backup(c *Config, name string) (string, error) {
 	src := filepath.Join(c.SkillsDir, name)
-	dstDir := filepath.Join(c.SkillsDir, ".skillhub-backup")
+	dstDir := filepath.Join(c.SkillsDir, ".agentdeck-backup")
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return "", err
 	}
