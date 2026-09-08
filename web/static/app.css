@@ -103,6 +103,8 @@ td.right,th.right{text-align:right}td.c,th.c{text-align:center}
 .jobs tr.out-row summary{color:var(--muted)}
 /* Long absolute paths shouldn't force a table to overflow on narrow screens. */
 td.mono.xs{word-break:break-all}
+/* Audit details are now full shell commands; wrap rather than overflow. */
+td.faint.xs{word-break:break-word;white-space:pre-wrap;max-width:520px}
 .envtable td.c{min-width:120px}
 .cellbox{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .sub-note{color:var(--faint);font-size:11px;margin-top:3px}
