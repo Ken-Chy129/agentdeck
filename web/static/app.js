@@ -89,7 +89,7 @@ async function machines() {
       <pre>agentdeck login ${base} ${r.enroll_token} --name $(hostname -s)
 agentdeck sync</pre>
       <details><summary>还没装 agentdeck CLI？</summary><pre>go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest</pre>
-      <p class="muted small">或从 GitHub Releases 下载对应平台二进制放进 PATH。</p></details></div>`;
+      <p class="muted small">仓库是公开的，不需要凭证；需要 Go ≥ 1.25（低版本会自动下载工具链）。</p></details></div>`;
   };
 }
 function machineCard(m, assigned, latest) {
