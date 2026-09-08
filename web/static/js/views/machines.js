@@ -90,7 +90,7 @@ async function tabCli(body, { m, id }) {
   ${behind.length ? `<button class="small" id="upAll">升级全部（${behind.length}）</button>` : ''}</div>
   <table><thead><tr><th>工具</th><th>版本</th><th>最新</th><th>来源</th><th>路径</th><th></th></tr></thead><tbody>
   ${(inv.tools || []).map(t => { const lv = t.package ? latest[t.package] : ''; const old = lv && semverLt(t.version, lv); const cmd = upgradeCmd(t);
-    return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}</td>
+    return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}${(t.shadowed || []).length ? `<div class="bad-text xs" title="PATH 里还有别的同名副本，跑的是上面那个">被遮挡 ${t.shadowed.length} 份：${t.shadowed.map(x => h(x)).join('、')}</div>` : ''}</td>
     <td class="right nowrap">${cmd ? `<button class="ghost small" onclick="copyText(${JSON.stringify(cmd)})">复制</button>
     <button class="small" data-up="${h(cmd)}" data-tool="${h(t.name)}">${old ? '升级' : '重装'}</button>` : ''}</td></tr>`; }).join('') || emptyRow(6, '尚无 inventory，等第一次 sync')}</tbody></table>
   <p class="help">升级命令由机器自己算出来（认得 npm prefix / nvm / native 安装器 / codex standalone），点「升级」直接在那台机器上跑。</p></div>

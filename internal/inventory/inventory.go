@@ -120,22 +120,28 @@ func Collect(ctx context.Context) *protocol.Inventory {
 		switch {
 		case strings.Contains(real, "/.local/share/claude/"):
 			tool.Source = "native" // Anthropic's curl installer; upgrade with `claude update`
-		case strings.Contains(real, "/Cellar/") || strings.Contains(real, "/homebrew/") || strings.Contains(real, "/linuxbrew/"):
-			tool.Source = "brew"
 		case strings.Contains(real, "/.codex/packages/"):
 			tool.Source = "standalone" // Codex's own package manager; `codex update`
+		// Check node_modules before brew: an npm package installed with brew's
+		// npm lives under the brew prefix but is NOT a formula, so
+		// `brew upgrade <name>` would fail with "no available formula".
 		case strings.Contains(real, "/node_modules/") || strings.Contains(p, "/.nvm/") || strings.Contains(p, "/node_modules/"):
 			tool.Source = "npm-global"
+		case strings.Contains(real, "/Cellar/") || strings.Contains(real, "/Caskroom/") || strings.Contains(real, "/homebrew/") || strings.Contains(real, "/linuxbrew/"):
+			tool.Source = "brew"
 		}
 		if t.pkg != "" {
 			if v, ok := npmPkgs[t.pkg]; ok && tool.Source == "npm-global" && tool.Version == "" {
 				tool.Version = v
 			}
-			if _, ok := npmPkgs[t.pkg]; !ok && tool.Source == "npm-global" {
+			// If npm's default prefix doesn't list it AND the binary isn't
+			// inside a node_modules tree, our npm guess was wrong.
+			if _, ok := npmPkgs[t.pkg]; !ok && tool.Source == "npm-global" && npmPrefixOf(real) == "" {
 				tool.Source = "binary"
 			}
 		}
 		tool.Upgrade = upgradeCommand(tool, real, npmPrefix)
+		tool.Shadowed = shadowedCopies(t.bin, p)
 		inv.Tools = append(inv.Tools, tool)
 	}
 
@@ -162,6 +168,33 @@ func npmPrefixOf(realPath string) string {
 		return ""
 	}
 	return realPath[:i]
+}
+
+// shadowedCopies walks $PATH for other executables with the same name. The
+// first hit is the one that runs; anything after it is dead weight that makes
+// "which version am I actually using?" confusing.
+func shadowedCopies(bin, active string) []string {
+	var out []string
+	seen := map[string]bool{active: true}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			continue
+		}
+		p := filepath.Join(dir, bin)
+		if seen[p] {
+			continue
+		}
+		info, err := os.Stat(p)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= 4 {
+			break
+		}
+	}
+	return out
 }
 
 // upgradeCommand returns the command that actually upgrades this tool here.

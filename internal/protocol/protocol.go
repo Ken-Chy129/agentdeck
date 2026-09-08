@@ -15,6 +15,10 @@ type CLITool struct {
 	// Computed locally because only the machine knows its real layout (npm
 	// prefix, nvm dir, Anthropic's native installer, codex standalone, ...).
 	Upgrade string `json:"upgrade,omitempty"`
+	// Shadowed lists other copies of this binary further down $PATH. Duplicate
+	// installs are a common cause of "I upgraded it but the old version keeps
+	// running".
+	Shadowed []string `json:"shadowed,omitempty"`
 }
 
 type Runtime struct {
