@@ -125,22 +125,28 @@ func cmdSync(ctx context.Context, args []string) error {
 	}
 	if !*quiet {
 		counts := map[string]int{}
-		for _, s := range rep.Skills {
-			counts[s.Action]++
+		for _, s := range rep.Resources {
+			counts[s.Kind+":"+s.Action]++
 		}
 		var parts []string
-		for _, k := range []string{"installed", "updated", "removed", "unchanged", "failed"} {
-			if counts[k] > 0 {
-				parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
+		for _, kind := range []string{"skill", "env", "config"} {
+			var kp []string
+			for _, a := range []string{"applied", "removed", "unchanged", "failed"} {
+				if n := counts[kind+":"+a]; n > 0 {
+					kp = append(kp, fmt.Sprintf("%d %s", n, a))
+				}
+			}
+			if len(kp) > 0 {
+				parts = append(parts, kind+"("+strings.Join(kp, ", ")+")")
 			}
 		}
 		if len(parts) == 0 {
-			parts = []string{"no skills assigned"}
+			parts = []string{"nothing assigned"}
 		}
-		fmt.Printf("sync done in %s: %s; %d jobs\n", rep.Duration, strings.Join(parts, ", "), len(rep.Jobs))
-		for _, s := range rep.Skills {
+		fmt.Printf("sync done in %s: %s; %d jobs\n", rep.Duration, strings.Join(parts, " "), len(rep.Jobs))
+		for _, s := range rep.Resources {
 			if s.Error != "" {
-				fmt.Printf("  ! %s: %s\n", s.Name, s.Error)
+				fmt.Printf("  ! %s/%s: %s\n", s.Kind, s.Name, s.Error)
 			}
 		}
 		for _, j := range rep.Jobs {
@@ -187,6 +193,18 @@ func cmdStatus() error {
 		}
 	}
 	fmt.Printf("\n%d managed, %d unmanaged local skills\n", managed, other)
+	if len(lock.Env) > 0 {
+		fmt.Printf("\nenv (%d vars -> ~/.config/agentdeck/env.sh):\n", len(lock.Env))
+		for n := range lock.Env {
+			fmt.Printf("  %s\n", n)
+		}
+	}
+	if len(lock.Configs) > 0 {
+		fmt.Printf("\nconfigs:\n")
+		for n, le := range lock.Configs {
+			fmt.Printf("  %-24s v%-3d -> %s (keys: %s)\n", n, le.Version, le.Path, strings.Join(lock.ConfigState.Keys[le.Path], ","))
+		}
+	}
 	return nil
 }
 
@@ -226,6 +244,8 @@ func cmdPush(ctx context.Context, args []string) error {
 		v, _ := out["version"].(map[string]any)
 		ver, _ := v["version"].(float64)
 		vid, _ := v["id"].(float64)
+		r, _ := out["resource"].(map[string]any)
+		rid, _ := r["id"].(float64)
 		if created {
 			fmt.Printf("published %s v%d (%s, %d files)\n", name, int(ver), humanSize(set.Size()), len(set.Files))
 		} else {
@@ -234,7 +254,7 @@ func cmdPush(ctx context.Context, args []string) error {
 		// If this dir is the canonical one, mark it managed at this exact version so the next
 		// sync sees it as unchanged instead of backing it up.
 		if abs, _ := filepath.Abs(dir); abs == filepath.Join(c.SkillsDir, name) && !*noAssign {
-			lock.Skills[name] = sync.LockEntry{Version: int(ver), VersionID: int64(vid), Digest: set.Digest(), SyncedAt: nowStr()}
+			lock.Skills[name] = sync.LockEntry{ResourceID: int64(rid), Version: int(ver), VersionID: int64(vid), Digest: set.Digest(), SyncedAt: nowStr()}
 		}
 	}
 	return c.SaveLock(lock)

@@ -15,10 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ken-Chy129/agentdeck/internal/apply"
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // Config lives at ~/.config/agentdeck/config.json (0600).
 type Config struct {
@@ -30,16 +31,21 @@ type Config struct {
 	LinkDirs     []string `json:"link_dirs,omitempty"` // agent dirs that get symlinks, default ~/.claude/skills
 }
 
-// Lock lives next to the skills dir: ~/.agents/skills/.agentdeck-lock.json.
+// Lock records what this machine has applied: ~/.agents/skills/.agentdeck-lock.json.
 type Lock struct {
-	Skills map[string]LockEntry `json:"skills"`
+	Skills      map[string]LockEntry `json:"skills"`
+	Env         map[string]LockEntry `json:"env"`
+	Configs     map[string]LockEntry `json:"configs"`
+	ConfigState apply.ConfigState    `json:"config_state"`
 }
 
 type LockEntry struct {
-	Version   int    `json:"version"`
-	VersionID int64  `json:"version_id"`
-	Digest    string `json:"digest"`
-	SyncedAt  string `json:"synced_at"`
+	ResourceID int64  `json:"resource_id,omitempty"`
+	Version    int    `json:"version"`
+	VersionID  int64  `json:"version_id"`
+	Digest     string `json:"digest"`
+	Path       string `json:"path,omitempty"`
+	SyncedAt   string `json:"synced_at"`
 }
 
 func home() string { h, _ := os.UserHomeDir(); return h }
@@ -91,12 +97,21 @@ func (c *Config) Save() error {
 func (c *Config) LockPath() string { return filepath.Join(c.SkillsDir, ".agentdeck-lock.json") }
 
 func (c *Config) LoadLock() *Lock {
-	l := &Lock{Skills: map[string]LockEntry{}}
+	l := &Lock{}
 	if b, err := os.ReadFile(c.LockPath()); err == nil {
 		_ = json.Unmarshal(b, l)
-		if l.Skills == nil {
-			l.Skills = map[string]LockEntry{}
-		}
+	}
+	if l.Skills == nil {
+		l.Skills = map[string]LockEntry{}
+	}
+	if l.Env == nil {
+		l.Env = map[string]LockEntry{}
+	}
+	if l.Configs == nil {
+		l.Configs = map[string]LockEntry{}
+	}
+	if l.ConfigState.Keys == nil {
+		l.ConfigState.Keys = map[string][]string{}
 	}
 	return l
 }
@@ -182,9 +197,9 @@ func (c *Client) Report(ctx context.Context, rep protocol.SyncReport) error {
 	return c.JSON(ctx, "POST", "/api/agent/report", rep, nil)
 }
 
-func (c *Client) Archive(ctx context.Context, name string, versionID int64) ([]byte, error) {
+func (c *Client) Archive(ctx context.Context, versionID int64) ([]byte, error) {
 	var buf bytes.Buffer
-	err := c.do(ctx, "GET", fmt.Sprintf("/api/agent/skills/%s/versions/%d/archive", name, versionID), nil, "", &buf)
+	err := c.do(ctx, "GET", fmt.Sprintf("/api/agent/versions/%d/archive", versionID), nil, "", &buf)
 	return buf.Bytes(), err
 }
 

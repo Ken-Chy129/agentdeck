@@ -48,21 +48,44 @@ type LocalSkill struct {
 	Size    int64  `json:"size"`
 }
 
+// AppliedState is what the machine currently has for each managed resource.
+type AppliedState struct {
+	ID     int64  `json:"id"`
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Digest string `json:"digest"`
+}
+
 // ---- sync ----
 
 type SyncRequest struct {
-	Inventory   *Inventory   `json:"inventory,omitempty"`
-	Snapshot    *Snapshot    `json:"snapshot,omitempty"`
-	LocalSkills []LocalSkill `json:"local_skills"`
-	CLIVersion  string       `json:"cli_version"`
+	Inventory   *Inventory     `json:"inventory,omitempty"`
+	Snapshot    *Snapshot      `json:"snapshot,omitempty"`
+	LocalSkills []LocalSkill   `json:"local_skills"`
+	Applied     []AppliedState `json:"applied"`
+	CLIVersion  string         `json:"cli_version"`
 }
 
-type DesiredSkill struct {
+// DesiredResource is one resource the machine should have. Content delivery:
+//
+//	skill  -> fetched via /archive by version_id (tar.gz)
+//	env    -> Value inline (already resolved for this machine)
+//	config -> Content inline (profile text) + Override inline (machine overrides), both same format
+type DesiredResource struct {
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	VersionID int64  `json:"version_id"`
 	Version   int    `json:"version"`
-	Digest    string `json:"digest"`
-	Size      int64  `json:"size"`
+	Digest    string `json:"digest"` // effective digest incl. override
+	Size      int64  `json:"size,omitempty"`
+	Value     string `json:"value,omitempty"`    // env
+	Secret    bool   `json:"secret,omitempty"`   // env
+	Content   string `json:"content,omitempty"`  // config profile text
+	Override  string `json:"override,omitempty"` // config machine override text
+	Tool      string `json:"tool,omitempty"`     // config: claude | codex | ...
+	Path      string `json:"path,omitempty"`     // config: target file (~ allowed)
+	Format    string `json:"format,omitempty"`   // config: json | toml | yaml
 }
 
 type Job struct {
@@ -72,19 +95,23 @@ type Job struct {
 }
 
 type SyncResponse struct {
-	MachineID   string         `json:"machine_id"`
-	MachineName string         `json:"machine_name"`
-	Skills      []DesiredSkill `json:"skills"`
-	Jobs        []Job          `json:"jobs"`
+	MachineID   string            `json:"machine_id"`
+	MachineName string            `json:"machine_name"`
+	Resources   []DesiredResource `json:"resources"`
+	Jobs        []Job             `json:"jobs"`
+	// Import requests: server asks the machine to upload the real value of these exports.
+	ImportEnv []string `json:"import_env,omitempty"`
 }
 
-type SkillResult struct {
+type ResourceResult struct {
+	ID     int64  `json:"id"`
+	Kind   string `json:"kind"`
 	Name   string `json:"name"`
-	Action string `json:"action"` // installed | updated | removed | unchanged | failed
-	From   int    `json:"from,omitempty"`
-	To     int    `json:"to,omitempty"`
+	Action string `json:"action"` // applied | unchanged | removed | failed
+	Digest string `json:"digest,omitempty"`
 	Error  string `json:"error,omitempty"`
 	Backup string `json:"backup,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type JobResult struct {
@@ -94,10 +121,11 @@ type JobResult struct {
 }
 
 type SyncReport struct {
-	Skills   []SkillResult `json:"skills"`
-	Jobs     []JobResult   `json:"jobs"`
-	Duration string        `json:"duration"`
-	Error    string        `json:"error,omitempty"`
+	Resources []ResourceResult  `json:"resources"`
+	Jobs      []JobResult       `json:"jobs"`
+	Duration  string            `json:"duration"`
+	Error     string            `json:"error,omitempty"`
+	Imported  map[string]string `json:"imported,omitempty"` // env name -> real value (TLS only)
 }
 
 // ---- enroll ----

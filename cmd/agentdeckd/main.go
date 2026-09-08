@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ken-Chy129/agentdeck/internal/api"
+	"github.com/Ken-Chy129/agentdeck/internal/secret"
 	"github.com/Ken-Chy129/agentdeck/internal/store"
 	"github.com/Ken-Chy129/agentdeck/web"
 )
@@ -37,8 +38,13 @@ func main() {
 	}
 	defer st.Close()
 
+	box, err := secret.Load(filepath.Join(*dataDir, "master_key"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	mux := http.NewServeMux()
-	api.New(st, adminToken).Register(mux)
+	api.New(st, box, adminToken).Register(mux)
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 

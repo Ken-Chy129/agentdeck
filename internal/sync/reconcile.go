@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/Ken-Chy129/agentdeck/internal/apply"
 	"github.com/Ken-Chy129/agentdeck/internal/bundle"
 	"github.com/Ken-Chy129/agentdeck/internal/collect"
 	"github.com/Ken-Chy129/agentdeck/internal/inventory"
@@ -53,8 +55,21 @@ type Options struct {
 	Log       func(format string, a ...any)
 }
 
-// Run performs one full sync. Server state wins; local edits to managed skills
-// are moved to <SkillsDir>/.agentdeck-backup/<name>-<ts>/ before being replaced.
+func appliedState(lock *Lock) []protocol.AppliedState {
+	out := []protocol.AppliedState{}
+	for name, le := range lock.Skills {
+		out = append(out, protocol.AppliedState{ID: le.ResourceID, Kind: "skill", Name: name, Digest: le.Digest})
+	}
+	for name, le := range lock.Env {
+		out = append(out, protocol.AppliedState{ID: le.ResourceID, Kind: "env", Name: name, Digest: le.Digest})
+	}
+	for name, le := range lock.Configs {
+		out = append(out, protocol.AppliedState{ID: le.ResourceID, Kind: "config", Name: name, Digest: le.Digest})
+	}
+	return out
+}
+
+// Run performs one full sync. Server state wins.
 func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, error) {
 	logf := opt.Log
 	if logf == nil {
@@ -69,7 +84,7 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 		localBy[l.Name] = l
 	}
 
-	req := protocol.SyncRequest{LocalSkills: local, CLIVersion: Version}
+	req := protocol.SyncRequest{LocalSkills: local, Applied: appliedState(lock), CLIVersion: Version}
 	if opt.Inventory {
 		logf("collecting inventory…")
 		req.Inventory = inventory.Collect(ctx)
@@ -79,93 +94,37 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 	if err != nil {
 		return nil, err
 	}
-	rep := &protocol.SyncReport{Skills: []protocol.SkillResult{}, Jobs: []protocol.JobResult{}}
+	rep := &protocol.SyncReport{Resources: []protocol.ResourceResult{}, Jobs: []protocol.JobResult{}}
 
-	desired := map[string]protocol.DesiredSkill{}
-	for _, d := range resp.Skills {
-		desired[d.Name] = d
-	}
+	var envs []protocol.DesiredResource
+	desiredSkills := map[string]bool{}
+	desiredEnv := map[string]bool{}
+	desiredCfg := map[string]bool{}
 
-	// install / update
-	for _, d := range resp.Skills {
-		dir := filepath.Join(c.SkillsDir, d.Name)
-		l, present := localBy[d.Name]
-		le, managed := lock.Skills[d.Name]
-		res := protocol.SkillResult{Name: d.Name, To: d.Version}
-		switch {
-		case present && l.Digest == d.Digest:
-			res.Action = "unchanged"
-			if !managed || le.Digest != d.Digest {
-				lock.Skills[d.Name] = LockEntry{Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, SyncedAt: now()}
-			}
-		default:
-			if present {
-				if managed {
-					res.From = le.Version
-					res.Action = "updated"
-				} else {
-					res.Action = "installed"
-				}
-				if !managed || l.Digest != le.Digest {
-					// unmanaged dir or locally-modified managed dir -> back up first
-					bk, err := backup(c, d.Name)
-					if err != nil {
-						res.Action, res.Error = "failed", "backup: "+err.Error()
-						rep.Skills = append(rep.Skills, res)
-						continue
-					}
-					res.Backup = bk
-					if !opt.DryRun {
-						logf("backed up local %s -> %s", d.Name, bk)
-					}
-				}
-			} else {
-				res.Action = "installed"
-			}
-			if opt.DryRun {
-				logf("[dry-run] would %s %s v%d", res.Action, d.Name, d.Version)
-				rep.Skills = append(rep.Skills, res)
-				continue
-			}
-			arch, err := cl.Archive(ctx, d.Name, d.VersionID)
-			if err != nil {
-				res.Action, res.Error = "failed", err.Error()
-				rep.Skills = append(rep.Skills, res)
-				continue
-			}
-			set, err := bundle.Unpack(bytes.NewReader(arch))
-			if err != nil {
-				res.Action, res.Error = "failed", "unpack: "+err.Error()
-				rep.Skills = append(rep.Skills, res)
-				continue
-			}
-			if got := set.Digest(); got != d.Digest {
-				res.Action, res.Error = "failed", fmt.Sprintf("digest mismatch: want %s got %s", d.Digest, got)
-				rep.Skills = append(rep.Skills, res)
-				continue
-			}
-			if err := set.WriteDir(dir); err != nil {
-				res.Action, res.Error = "failed", err.Error()
-				rep.Skills = append(rep.Skills, res)
-				continue
-			}
-			lock.Skills[d.Name] = LockEntry{Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, SyncedAt: now()}
-			logf("%s %s v%d", res.Action, d.Name, d.Version)
+	for _, d := range resp.Resources {
+		switch d.Kind {
+		case "skill":
+			desiredSkills[d.Name] = true
+			rep.Resources = append(rep.Resources, applySkill(ctx, cl, c, lock, localBy, d, opt.DryRun, logf))
+		case "env":
+			desiredEnv[d.Name] = true
+			envs = append(envs, d)
+		case "config":
+			desiredCfg[d.Name] = true
+			rep.Resources = append(rep.Resources, applyConfig(c, lock, d, opt.DryRun, logf))
 		}
-		rep.Skills = append(rep.Skills, res)
 	}
 
-	// remove: managed skills no longer desired
+	// skills no longer desired
 	for name, le := range lock.Skills {
-		if _, want := desired[name]; want {
+		if desiredSkills[name] {
 			continue
 		}
-		res := protocol.SkillResult{Name: name, Action: "removed", From: le.Version}
+		res := protocol.ResourceResult{ID: le.ResourceID, Kind: "skill", Name: name, Action: "removed"}
 		dir := filepath.Join(c.SkillsDir, name)
 		if l, present := localBy[name]; present {
 			if l.Digest != le.Digest {
-				bk, err := backup(c, name)
-				if err == nil {
+				if bk, err := backup(c, name); err == nil {
 					res.Backup = bk
 				}
 			}
@@ -177,11 +136,58 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 		}
 		if !opt.DryRun {
 			delete(lock.Skills, name)
-			logf("removed %s", name)
-		} else {
-			logf("[dry-run] would remove %s", name)
 		}
-		rep.Skills = append(rep.Skills, res)
+		logf("removed skill %s", name)
+		rep.Resources = append(rep.Resources, res)
+	}
+
+	// env: render all at once
+	envChanged := false
+	for _, d := range envs {
+		res := protocol.ResourceResult{ID: d.ID, Kind: "env", Name: d.Name, Digest: d.Digest, Action: "unchanged"}
+		if le, ok := lock.Env[d.Name]; !ok || le.Digest != d.Digest {
+			res.Action = "applied"
+			envChanged = true
+		}
+		if !opt.DryRun {
+			lock.Env[d.Name] = LockEntry{ResourceID: d.ID, Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, SyncedAt: now()}
+		}
+		rep.Resources = append(rep.Resources, res)
+	}
+	for name, le := range lock.Env {
+		if desiredEnv[name] {
+			continue
+		}
+		envChanged = true
+		rep.Resources = append(rep.Resources, protocol.ResourceResult{ID: le.ResourceID, Kind: "env", Name: name, Action: "removed"})
+		if !opt.DryRun {
+			delete(lock.Env, name)
+		}
+	}
+	if !opt.DryRun && (envChanged || len(envs) > 0) {
+		if changed, err := apply.RenderEnv(envs); err != nil {
+			rep.Error = "env: " + err.Error()
+		} else if changed {
+			logf("rendered %d env vars -> %s", len(envs), apply.EnvFile())
+		}
+	} else if opt.DryRun && envChanged {
+		logf("[dry-run] would render %d env vars", len(envs))
+	}
+
+	// configs no longer desired
+	for name, le := range lock.Configs {
+		if desiredCfg[name] {
+			continue
+		}
+		res := protocol.ResourceResult{ID: le.ResourceID, Kind: "config", Name: name, Action: "removed"}
+		if !opt.DryRun {
+			if err := apply.RemoveConfig(le.Path, &lock.ConfigState); err != nil {
+				res.Action, res.Error = "failed", err.Error()
+			}
+			delete(lock.Configs, name)
+		}
+		logf("removed config %s", name)
+		rep.Resources = append(rep.Resources, res)
 	}
 
 	if !opt.DryRun {
@@ -190,6 +196,19 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 		}
 		if err := Relink(c); err != nil {
 			rep.Error = "relink: " + err.Error()
+		}
+	}
+
+	// import requests
+	if len(resp.ImportEnv) > 0 && !opt.DryRun {
+		rep.Imported = map[string]string{}
+		for _, n := range resp.ImportEnv {
+			if v, ok := apply.ReadExport(n); ok {
+				rep.Imported[n] = v
+				logf("imported %s for deck", n)
+			} else {
+				logf("import %s: not set in login shell", n)
+			}
 		}
 	}
 
@@ -211,8 +230,7 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 
 	rep.Duration = time.Since(start).Round(time.Millisecond).String()
 	if !opt.DryRun {
-		// Re-scan so the server sees post-sync state (and refreshed inventory if a job ran).
-		post := protocol.SyncRequest{LocalSkills: ScanLocal(c, c.LoadLock()), CLIVersion: Version}
+		post := protocol.SyncRequest{LocalSkills: ScanLocal(c, lock), Applied: appliedState(lock), CLIVersion: Version}
 		if len(rep.Jobs) > 0 && opt.Inventory {
 			post.Inventory = inventory.Collect(ctx)
 		}
@@ -222,8 +240,93 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 		if err := cl.Report(ctx, *rep); err != nil {
 			logf("warn: report failed: %v", err)
 		}
+		rep.Imported = nil
 	}
 	return rep, nil
+}
+
+func applySkill(ctx context.Context, cl *Client, c *Config, lock *Lock, localBy map[string]protocol.LocalSkill, d protocol.DesiredResource, dry bool, logf func(string, ...any)) protocol.ResourceResult {
+	dir := filepath.Join(c.SkillsDir, d.Name)
+	l, present := localBy[d.Name]
+	le, managed := lock.Skills[d.Name]
+	res := protocol.ResourceResult{ID: d.ID, Kind: "skill", Name: d.Name, Digest: d.Digest}
+	if present && l.Digest == d.Digest {
+		res.Action = "unchanged"
+		if !managed || le.Digest != d.Digest {
+			lock.Skills[d.Name] = LockEntry{ResourceID: d.ID, Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, SyncedAt: now()}
+		}
+		return res
+	}
+	res.Action = "applied"
+	if present && (!managed || l.Digest != le.Digest) {
+		bk, err := backup(c, d.Name)
+		if err != nil {
+			res.Action, res.Error = "failed", "backup: "+err.Error()
+			return res
+		}
+		res.Backup = bk
+		if !dry {
+			logf("backed up local %s -> %s", d.Name, bk)
+		}
+	}
+	if dry {
+		logf("[dry-run] would install skill %s v%d", d.Name, d.Version)
+		return res
+	}
+	arch, err := cl.Archive(ctx, d.VersionID)
+	if err != nil {
+		res.Action, res.Error = "failed", err.Error()
+		return res
+	}
+	set, err := bundle.Unpack(bytes.NewReader(arch))
+	if err != nil {
+		res.Action, res.Error = "failed", "unpack: "+err.Error()
+		return res
+	}
+	if got := set.Digest(); got != d.Digest {
+		res.Action, res.Error = "failed", fmt.Sprintf("digest mismatch: want %s got %s", d.Digest, got)
+		return res
+	}
+	if err := set.WriteDir(dir); err != nil {
+		res.Action, res.Error = "failed", err.Error()
+		return res
+	}
+	lock.Skills[d.Name] = LockEntry{ResourceID: d.ID, Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, SyncedAt: now()}
+	logf("installed skill %s v%d", d.Name, d.Version)
+	return res
+}
+
+func applyConfig(c *Config, lock *Lock, d protocol.DesiredResource, dry bool, logf func(string, ...any)) protocol.ResourceResult {
+	res := protocol.ResourceResult{ID: d.ID, Kind: "config", Name: d.Name, Digest: d.Digest}
+	le, managed := lock.Configs[d.Name]
+	if managed && le.Digest == d.Digest && le.Path == d.Path {
+		// still verify the file has our keys (user may have hand-edited); cheap to re-apply
+	}
+	if dry {
+		res.Action = "applied"
+		if managed && le.Digest == d.Digest {
+			res.Action = "unchanged"
+		}
+		logf("[dry-run] would merge config %s into %s", d.Name, d.Path)
+		return res
+	}
+	if managed && le.Path != "" && le.Path != d.Path {
+		_ = apply.RemoveConfig(le.Path, &lock.ConfigState)
+	}
+	changed, bk, err := apply.ApplyConfig(d, &lock.ConfigState)
+	if err != nil {
+		res.Action, res.Error = "failed", err.Error()
+		return res
+	}
+	res.Backup = bk
+	if changed {
+		res.Action = "applied"
+		logf("merged config %s -> %s", d.Name, d.Path)
+	} else {
+		res.Action = "unchanged"
+	}
+	lock.Configs[d.Name] = LockEntry{ResourceID: d.ID, Version: d.Version, VersionID: d.VersionID, Digest: d.Digest, Path: d.Path, SyncedAt: now()}
+	return res
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -242,17 +345,19 @@ func backup(c *Config, name string) (string, error) {
 	return dst, set.WriteDir(dst)
 }
 
-// Relink makes sure every *managed* skill dir in SkillsDir has a symlink in each
-// LinkDir (e.g. ~/.claude/skills/<name> -> ../../.agents/skills/<name>). Existing
-// real directories or foreign symlinks in LinkDirs are left untouched; unmanaged
-// skills are not linked.
+// Relink makes sure every managed skill dir has a symlink in each LinkDir.
 func Relink(c *Config) error {
 	lock := c.LoadLock()
+	names := make([]string, 0, len(lock.Skills))
+	for n := range lock.Skills {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	for _, ld := range c.LinkDirs {
 		if err := os.MkdirAll(ld, 0o755); err != nil {
 			return err
 		}
-		for name := range lock.Skills {
+		for _, name := range names {
 			target := filepath.Join(c.SkillsDir, name)
 			if fi, err := os.Stat(target); err != nil || !fi.IsDir() {
 				continue
@@ -263,28 +368,21 @@ func Relink(c *Config) error {
 				rel = target
 			}
 			if fi, err := os.Lstat(link); err == nil {
-				if fi.Mode()&os.ModeSymlink != 0 {
-					if cur, _ := os.Readlink(link); cur == rel || cur == target {
-						continue
-					}
-					if resolved, err := filepath.EvalSymlinks(link); err != nil || resolved != target {
-						// dangling or points elsewhere: only replace if dangling
-						if err == nil {
-							continue
-						}
-						os.Remove(link)
-					} else {
-						continue
-					}
-				} else {
-					continue // real dir/file owned by user
+				if fi.Mode()&os.ModeSymlink == 0 {
+					continue // real dir owned by user
 				}
+				if cur, _ := os.Readlink(link); cur == rel || cur == target {
+					continue
+				}
+				if _, err := os.Stat(link); err == nil {
+					continue // points somewhere valid, leave it
+				}
+				os.Remove(link) // dangling
 			}
 			if err := os.Symlink(rel, link); err != nil && !os.IsExist(err) {
 				return err
 			}
 		}
-		// prune dangling symlinks we may have created for removed skills
 		les, _ := os.ReadDir(ld)
 		for _, le := range les {
 			p := filepath.Join(ld, le.Name())
