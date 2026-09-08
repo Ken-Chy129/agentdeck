@@ -86,12 +86,25 @@ export const meta = (res) => (res && typeof res.meta === 'object' && res.meta) |
 
 // ---- shared data loaders ----
 // Caches live for TTL ms; any mutation calls invalidate(). Pending requests are shared.
+// The overview is also mirrored into sessionStorage so a reload paints from cache
+// immediately (stale-while-revalidate: the view re-renders when fresh data lands).
 const TTL = 60000;
+const SS_KEY = 'agentdeck_ov_cache';
 let ovCache = null, ovAt = 0, ovPending = null;
+try { const s = JSON.parse(sessionStorage.getItem(SS_KEY) || 'null'); if (s?.data) { ovCache = index(s.data); ovAt = s.at; } } catch {}
 export async function overview(force) {
-  if (!force && ovCache && Date.now() - ovAt < TTL) return ovCache;
-  if (ovPending) return ovPending;
-  ovPending = api('GET', '/api/admin/overview').then(d => { ovCache = index(d); ovAt = Date.now(); ovPending = null; return ovCache; }, e => { ovPending = null; throw e; });
+  const fresh = ovCache && Date.now() - ovAt < TTL;
+  if (!force && fresh) return ovCache;
+  if (ovPending) return ovCache && !force ? ovCache : ovPending;
+  ovPending = api('GET', '/api/admin/overview').then(d => {
+    ovCache = index(d); ovAt = Date.now(); ovPending = null;
+    try { sessionStorage.setItem(SS_KEY, JSON.stringify({ at: ovAt, data: d })); } catch {}
+    return ovCache;
+  }, e => { ovPending = null; throw e; });
+  if (ovCache && !force) { // stale: return immediately, re-render when fresh arrives
+    ovPending.then(() => window.reroute?.()).catch(() => {});
+    return ovCache;
+  }
   return ovPending;
 }
 function index(ovCache) {
@@ -103,7 +116,7 @@ function index(ovCache) {
   for (const a of ovCache.applied) (ovCache.appliedMap[a.machine_id] ||= {})[a.resource_id] = a;
   return ovCache;
 }
-export function invalidate() { ovCache = null; cfgCache = { full: null, exports: null }; cfgAt = 0; }
+export function invalidate() { ovCache = null; ovAt = 0; cfgCache = { full: null, exports: null }; cfgAt = 0; try { sessionStorage.removeItem(SS_KEY); } catch {} }
 
 // configs(): mode 'exports' (default) omits file contents — enough for env/overview.
 // Pass 'full' when the file text is needed (configs page).

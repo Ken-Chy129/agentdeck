@@ -583,7 +583,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		a.Override = "" // never leak sealed/override values in bulk
 	}
 	applied, _ := s.st.AllMachineResources(ctx)
-	writeJSON(w, 200, map[string]any{"machines": machines, "resources": resources, "assignments": assigns, "applied": applied, "now": time.Now().UTC().Format(time.RFC3339)})
+	// plaintext of non-secret env values, so the env matrix doesn't need one reveal call per row
+	values := map[int64]string{}
+	for _, res := range resources {
+		if res.Kind == "env" && !metaBool(res, "secret") && res.CurrentVersionID != 0 {
+			if _, content, err := s.st.CurrentContent(ctx, res.ID); err == nil {
+				if plain, err := s.box.Open(string(content)); err == nil {
+					values[res.ID] = plain
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"machines": machines, "resources": resources, "assignments": assigns, "applied": applied, "env_values": values, "now": time.Now().UTC().Format(time.RFC3339)})
 }
 
 // slimInventory drops the bulky npm_global/brew lists (hundreds of entries per
@@ -982,14 +993,12 @@ func (s *Server) setAssignment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) npmLatestHandler(w http.ResponseWriter, r *http.Request) {
-	pkgs := strings.Split(r.URL.Query().Get("pkgs"), ",")
-	out := map[string]string{}
-	for _, p := range pkgs {
+	var pkgs []string
+	for _, p := range strings.Split(r.URL.Query().Get("pkgs"), ",") {
 		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+		if p != "" {
+			pkgs = append(pkgs, p)
 		}
-		out[p] = s.npmLatest.get(r.Context(), p)
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, s.npmLatest.getMany(r.Context(), pkgs))
 }

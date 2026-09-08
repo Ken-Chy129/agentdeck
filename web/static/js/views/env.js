@@ -31,12 +31,11 @@ export async function envView(id) {
   <div class="card flush" style="overflow:auto"><table class="envtable"><thead><tr><th style="min-width:200px">变量</th><th style="min-width:180px">总表值</th>${ms.map(m => `<th class="c">${h(m.name)}</th>`).join('')}<th></th></tr></thead><tbody>
   ${names.filter(n => !q || n.toLowerCase().includes(q)).map(n => { const r = byName[n];
     return `<tr data-row="${h(n)}"><td>${r ? `<a href="#/env/${r.id}" class="mono">${h(n)}</a>` : `<span class="mono">${h(n)}</span>`}${r?.meta?.secret ? ' <span class="faint">🔒</span>' : ''}<div class="sub-note">${r ? h(r.meta?.description || `v${r.current_version}`) : '未纳入总表'}</div></td>
-    <td>${r ? (r.meta?.secret ? `<span class="secret faint">••••••••</span> <button class="link small" data-reveal="${r.id}">显示</button>` : `<span class="mono small" id="val-${r.id}">…</span>`) : `<button class="link small" data-create="${h(n)}">手动填值</button>`}${consistency(n)}</td>
+    <td>${r ? (r.meta?.secret ? `<span class="secret faint">••••••••</span> <button class="link small" data-reveal="${r.id}">显示</button>` : `<span class="mono small" title="${h(ov.env_values?.[r.id] ?? '')}">${h(trunc(ov.env_values?.[r.id] ?? '', 40))}</span>`) : `<button class="link small" data-create="${h(n)}">手动填值</button>`}${consistency(n)}</td>
     ${ms.map(m => cell(n, m)).join('')}
     <td class="right nowrap">${r ? `<button class="ghost small" data-edit="${r.id}">编辑</button>` : ''}</td></tr>`; }).join('') || emptyRow(ms.length + 3, '还没有变量。')}</tbody></table>
   <p class="help">同一台机器 rc 里那份和总表分发的那份都会生效，后 source 的赢——rc 文件末尾 source env.sh，所以总表的值优先。收编完成后建议把 rc 里的那行删掉，"rc:" 提示就会消失。</p></div>`;
 
-  for (const r of managed) if (!r.meta?.secret) api('GET', `/api/admin/resources/${r.id}/reveal`).then(v => { const el = $(`#val-${r.id}`); if (el) { el.textContent = trunc(v.value, 40); el.title = v.value; } }).catch(() => {});
 
   $('#q').oninput = () => { sessionStorage.setItem('agentdeck_env_q', $('#q').value); const qq = $('#q').value.toLowerCase(); $$('[data-row]').forEach(tr => tr.hidden = qq && !tr.dataset.row.toLowerCase().includes(qq)); };
   $('#newE').onclick = () => editEnv(null);
@@ -76,8 +75,7 @@ export async function envDetail(id) {
   if (!r || r.kind !== 'env') { app.innerHTML = crumb('#/env', '环境变量') + empty('变量不存在'); return; }
   const det = await api('GET', `/api/admin/resources/${r.id}`);
   const secret = !!r.meta?.secret;
-  let shown = null;
-  if (!secret) { try { shown = (await api('GET', `/api/admin/resources/${r.id}/reveal`)).value; } catch {} }
+  let shown = secret ? null : (ov.env_values?.[r.id] ?? null);
 
   app.innerHTML = crumb('#/env', '环境变量') + pageHeader({ title: h(r.name) + (secret ? ' <span class="faint">🔒</span>' : ''), mono: true, sub: `v${r.current_version}`, desc: h(r.meta?.description || ''),
     actions: '<button id="edit">改值 / 描述</button><button class="danger small" id="del">删除</button>' }) + `
