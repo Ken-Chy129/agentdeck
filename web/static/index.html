@@ -4,22 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237aa2ff'/%3E%3Cpath d='M9 22l7-13 7 13H9zm4-3h6l-3-5.5z' fill='%230b0d12'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <aside id="side">
-  <div class="brand">Agent<span>Deck</span></div>
+  <div class="brand"><div class="mark">A</div>AgentDeck</div>
   <nav>
-    <a href="#/overview" data-tab="overview">总览</a>
-    <a href="#/machines" data-tab="machines">机器</a>
+    <a href="#/overview" data-tab="overview"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.2"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.2"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.2"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.2"/></svg>总览</a>
+    <a href="#/machines" data-tab="machines"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="8" rx="1.5"/><path d="M5 13.5h6M8 10.5v3"/></svg>机器</a>
     <div class="navsec">资源</div>
-    <a href="#/skills" data-tab="skills">Skill</a>
-    <a href="#/configs" data-tab="configs">配置</a>
-    <a href="#/env" data-tab="env">环境变量</a>
+    <a href="#/skills" data-tab="skills"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.8 4 4.2.5-3.1 2.9.8 4.3L8 11.1l-3.7 2.1.8-4.3L2 6l4.2-.5z"/></svg>Skill</a>
+    <a href="#/configs" data-tab="configs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4.5 1.5h5l3 3v10h-8z"/><path d="M9.5 1.5v3h3M6 8h4M6 10.5h4"/></svg>配置</a>
+    <a href="#/env" data-tab="env"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5M8 9.5h3.5"/></svg>环境变量</a>
     <div class="navsec">系统</div>
-    <a href="#/audit" data-tab="audit">审计</a>
+    <a href="#/audit" data-tab="audit"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3.5h12M2 8h12M2 12.5h8"/></svg>审计</a>
   </nav>
-  <div class="sidefoot"><button id="logout" class="ghost small">退出</button></div>
+  <div class="sidefoot"><span id="ver"></span><button id="logout" class="ghost small">退出</button></div>
 </aside>
 <main id="app"></main>
 <div id="toast"></div>

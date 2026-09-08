@@ -126,3 +126,12 @@ export function syncState(ov, m, res) {
 
 export const pill = (st) => st ? `<span class="pill ${st.cls}" title="${h(st.detail || '')}">${h(st.text)}</span>` : '';
 export const upgradeCmd = (t) => t.source === 'npm-global' && t.package ? `npm i -g ${t.package}@latest` : t.source === 'brew' ? `brew upgrade ${t.name}` : t.source === 'native' && t.name === 'claude' ? 'claude update' : '';
+
+// ---- page scaffolding ----
+export const crumb = (href, label) => `<a class="crumb" href="${href}">← ${h(label)}</a>`;
+export function pageHeader({ title, sub, desc, actions = '', mono = false }) {
+  return `<div class="page-h"><div><h1 class="${mono ? 'mono' : ''}">${title}${sub ? ` <span class="sub">${sub}</span>` : ''}</h1>${desc ? `<p class="desc">${desc}</p>` : ''}</div>${actions ? `<div class="actions">${actions}</div>` : ''}</div>`;
+}
+export const empty = (html) => `<div class="empty">${html}</div>`;
+export const emptyRow = (cols, html) => `<tr><td colspan="${cols}"><div class="empty">${html}</div></td></tr>`;
+export const statusPill = (s) => `<span class="pill ${s === 'done' ? 'ok' : s === 'failed' ? 'bad' : s === 'queued' ? 'warn' : ''}">${h(s)}</span>`;

@@ -9,10 +9,10 @@ import { auditView } from './views/audit.js';
 
 function showLogin() {
   document.body.classList.add('noauth');
-  app.innerHTML = `<div class="card login"><h1>登录 AgentDeck</h1>
-    <p class="muted">输入服务端 data/admin_token 里的管理 token。</p>
-    <input id="tok" type="password" placeholder="admin token" style="width:100%">
-    <div class="row" style="margin-top:12px"><button id="go">进入</button></div></div>`;
+  app.innerHTML = `<div class="card login"><div class="brand" style="padding:0 0 14px"><div class="mark">A</div>AgentDeck</div>
+    <h1>登录</h1><p class="muted" style="margin:0 0 14px">输入服务端 <code>data/admin_token</code> 里的管理 token。</p>
+    <div class="field"><input id="tok" type="password" placeholder="admin token" autocomplete="current-password"></div>
+    <div class="row end"><button id="go">进入</button></div></div>`;
   $('#go').onclick = async () => {
     setToken($('#tok').value.trim());
     try { await api('GET', '/api/admin/me'); document.body.classList.remove('noauth'); route(); } catch (e) { fail(new Error('token 不对')); }
