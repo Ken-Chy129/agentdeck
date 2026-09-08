@@ -174,3 +174,6 @@ details summary:hover{color:var(--fg)}
 .stat.tri{display:flex;gap:18px;align-items:flex-end}.stat.tri>div b{font-size:22px}
 .kind{display:inline-block;min-width:38px;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin-right:6px}
 .envtable thead th{background:var(--bg-3)}
+#loadbar{position:fixed;top:0;left:212px;right:0;height:2px;background:linear-gradient(90deg,var(--accent),#b18cff);transform:scaleX(0);transform-origin:left;opacity:0;transition:opacity .2s;z-index:40}
+#loadbar.on{opacity:1;animation:loadbar 1.4s ease-in-out infinite}
+@keyframes loadbar{0%{transform:scaleX(0)}60%{transform:scaleX(.7)}100%{transform:scaleX(1);opacity:0}}

@@ -570,6 +570,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range machines {
 		m.Snapshot = nil
+		m.LocalSkills = nil
+		m.Inventory = slimInventory(m.Inventory)
 	}
 	resources, err := s.st.ListResources(ctx, "")
 	if err != nil {
@@ -582,6 +584,25 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	applied, _ := s.st.AllMachineResources(ctx)
 	writeJSON(w, 200, map[string]any{"machines": machines, "resources": resources, "assignments": assigns, "applied": applied, "now": time.Now().UTC().Format(time.RFC3339)})
+}
+
+// slimInventory drops the bulky npm_global/brew lists (hundreds of entries per
+// machine) from list views; the machine detail endpoint still returns them.
+func slimInventory(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var inv map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		return raw
+	}
+	delete(inv, "npm_global")
+	delete(inv, "brew")
+	out, err := json.Marshal(inv)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func (s *Server) getMachine(w http.ResponseWriter, r *http.Request) {
@@ -698,6 +719,7 @@ func (s *Server) allConfigs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	exportsOnly := r.URL.Query().Get("fields") == "exports"
 	type entry struct {
 		MachineID   string          `json:"machine_id"`
 		MachineName string          `json:"machine_name"`
@@ -706,7 +728,17 @@ func (s *Server) allConfigs(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []entry{}
 	for _, m := range ms {
-		out = append(out, entry{MachineID: m.ID, MachineName: m.Name, SnapshotAt: m.SnapshotAt, Snapshot: m.Snapshot})
+		snap := m.Snapshot
+		if exportsOnly && len(snap) > 0 {
+			var s protocol.Snapshot
+			if json.Unmarshal(snap, &s) == nil {
+				for i := range s.Configs {
+					s.Configs[i].Content = ""
+				}
+				snap, _ = json.Marshal(s)
+			}
+		}
+		out = append(out, entry{MachineID: m.ID, MachineName: m.Name, SnapshotAt: m.SnapshotAt, Snapshot: snap})
 	}
 	writeJSON(w, 200, out)
 }

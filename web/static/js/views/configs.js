@@ -12,7 +12,7 @@ const KNOWN_TOOLS = [
 
 // ---- 配置页：Profile 列表 + 采集全貌 ----
 export async function configsView(sub) {
-  const [ov, cfg] = await Promise.all([overview(), configs()]);
+  const [ov, cfg] = await Promise.all([overview(), configs('full')]);
   if (sub === 'new') return profileEditor(null, ov);
   const profiles = ov.resources.filter(r => r.kind === 'config');
   const machines = cfg.filter(m => m.snapshot);

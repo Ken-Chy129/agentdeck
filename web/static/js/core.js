@@ -85,32 +85,57 @@ window.dl = dl;
 export const meta = (res) => (res && typeof res.meta === 'object' && res.meta) || {};
 
 // ---- shared data loaders ----
-let ovCache = null, ovAt = 0;
+// Caches live for TTL ms; any mutation calls invalidate(). Pending requests are shared.
+const TTL = 60000;
+let ovCache = null, ovAt = 0, ovPending = null;
 export async function overview(force) {
-  if (!force && ovCache && Date.now() - ovAt < 5000) return ovCache;
-  ovCache = await api('GET', '/api/admin/overview'); ovAt = Date.now();
+  if (!force && ovCache && Date.now() - ovAt < TTL) return ovCache;
+  if (ovPending) return ovPending;
+  ovPending = api('GET', '/api/admin/overview').then(d => { ovCache = index(d); ovAt = Date.now(); ovPending = null; return ovCache; }, e => { ovPending = null; throw e; });
+  return ovPending;
+}
+function index(ovCache) {
   ovCache.byMachine = Object.fromEntries(ovCache.machines.map(m => [m.id, m]));
   ovCache.byResource = Object.fromEntries(ovCache.resources.map(r => [r.id, r]));
-  ovCache.assignedTo = {}; // resource_id -> {machine_id: assignment}
-  ovCache.assignedOn = {}; // machine_id -> {resource_id: assignment}
+  ovCache.assignedTo = {}; ovCache.assignedOn = {};
   for (const a of ovCache.assignments) { (ovCache.assignedTo[a.resource_id] ||= {})[a.machine_id] = a; (ovCache.assignedOn[a.machine_id] ||= {})[a.resource_id] = a; }
-  ovCache.appliedMap = {}; // machine_id -> resource_id -> applied
+  ovCache.appliedMap = {};
   for (const a of ovCache.applied) (ovCache.appliedMap[a.machine_id] ||= {})[a.resource_id] = a;
   return ovCache;
 }
-export function invalidate() { ovCache = null; cfgCache = null; }
+export function invalidate() { ovCache = null; cfgCache = { full: null, exports: null }; cfgAt = 0; }
 
-let cfgCache = null;
-export async function configs(force) {
-  if (!force && cfgCache) return cfgCache;
-  cfgCache = await api('GET', '/api/admin/configs');
-  return cfgCache;
+// configs(): mode 'exports' (default) omits file contents — enough for env/overview.
+// Pass 'full' when the file text is needed (configs page).
+let cfgCache = { full: null, exports: null }, cfgAt = 0;
+export async function configs(mode = 'exports') {
+  const fresh = Date.now() - cfgAt < TTL;
+  if (fresh && cfgCache.full) return cfgCache.full;
+  if (fresh && mode === 'exports' && cfgCache.exports) return cfgCache.exports;
+  const d = await api('GET', '/api/admin/configs' + (mode === 'full' ? '' : '?fields=exports'));
+  cfgCache[mode] = d; cfgAt = Date.now();
+  return d;
 }
 
+// npm-latest lookups are cached client-side too, so page switches don't re-hit the registry.
+let npmCache = {}, npmAt = 0;
 export async function npmLatest(pkgs) {
   const list = [...new Set(pkgs.filter(Boolean))];
   if (!list.length) return {};
-  try { return await api('GET', '/api/admin/npm-latest?pkgs=' + list.map(encodeURIComponent).join(',')); } catch { return {}; }
+  if (Date.now() - npmAt > 10 * 60000) { npmCache = {}; }
+  const missing = list.filter(p => !(p in npmCache));
+  if (missing.length) {
+    try { Object.assign(npmCache, await api('GET', '/api/admin/npm-latest?pkgs=' + missing.map(encodeURIComponent).join(','))); npmAt = npmAt || Date.now(); } catch {}
+  }
+  return Object.fromEntries(list.map(p => [p, npmCache[p] || '']));
+}
+
+// Loading indicator: shown when a view takes > 150ms to first render.
+let loadTimer = null;
+export function loading(on) {
+  clearTimeout(loadTimer);
+  const bar = document.getElementById('loadbar');
+  if (on) loadTimer = setTimeout(() => bar.classList.add('on'), 150); else bar.classList.remove('on');
 }
 
 // status of a resource on a machine: {cls, text}

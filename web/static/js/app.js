@@ -1,5 +1,5 @@
 // AgentDeck console entry: login + hash routing. Vanilla ES modules, no build step.
-import { $, $$, app, api, h, token, setToken, setUnauthorizedHandler, fail, invalidate } from './core.js';
+import { $, $$, app, api, h, token, setToken, setUnauthorizedHandler, fail, loading } from './core.js';
 import { overviewView } from './views/overview.js';
 import { machinesView, machineDetail } from './views/machines.js';
 import { skillsView, skillDetail, skillEditor } from './views/skills.js';
@@ -39,10 +39,10 @@ export async function route() {
   $$('nav a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
   const view = routes[tab] || routes.overview;
   const my = ++seq;
+  loading(true);
   try {
-    invalidate();
     await view(decodeURIComponent(id || ''), rest.map(decodeURIComponent).join('/'));
-  } catch (e) { if (my === seq) fail(e); }
+  } catch (e) { if (my === seq) fail(e); } finally { if (my === seq) loading(false); }
 }
 window.addEventListener('hashchange', route);
 window.reroute = route;
