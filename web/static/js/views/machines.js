@@ -110,21 +110,37 @@ async function tabCli(body, { m, id }) {
 // the upgrade buttons so you never have to SSH in for a version bump.
 export async function execModal(id, cmd, title) {
   modal(`<h3>${h(title || '在机器上执行')}</h3>
-    <pre class="mono" style="white-space:pre-wrap">$ ${h(cmd)}</pre>
-    <div id="execOut" class="term muted small">等机器接单…（在线的话几秒内开始）</div>
-    <div class="row right mt12"><button class="ghost" onclick="closeModal()">关闭</button></div>`);
+    <pre class="mono" style="white-space:pre-wrap;margin-top:0">$ ${h(cmd)}</pre>
+    <div id="execOut" class="term term-tall muted">等机器接单…（在线的话几秒内开始）</div>
+    <p class="help" id="execHint">升级可能要跑 1-2 分钟。关掉这个框不会中断执行，稍后可在「任务」页看结果。</p>
+    <div class="row right mt12"><a class="crumb" id="execJobs" href="#/machines/${id}/jobs" style="margin:0">去任务页 →</a><button class="ghost" onclick="closeModal()">关闭</button></div>`);
   const out = $('#execOut');
+  const started = Date.now();
+  // Long upgrades look frozen without a ticking clock.
+  const tick = setInterval(() => {
+    if (!document.body.contains(out) || !out.classList.contains('muted')) return clearInterval(tick);
+    const s = Math.round((Date.now() - started) / 1000);
+    out.textContent = out.dataset.phase ? `${out.dataset.phase}（已 ${s}s）` : `等机器接单…（已 ${s}s）`;
+  }, 1000);
   try {
     let j = await runRemote(id, cmd, { waitSec: 60 });
     if (jobPending(j.status)) {
-      out.textContent = j.status === 'running' ? '机器已接单，执行中…' : '命令已排队，但机器还没接单。如果它没在 watch 模式，就要等下一次 sync。';
-      j = await awaitJob(j.id) || j;
+      out.dataset.phase = j.status === 'running' ? '机器已接单，执行中…' : '已排队，等机器接单（它可能不在 watch 模式）';
+      j = await awaitJob(j.id, { tries: 150, everyMs: 2000 }) || j;
     }
-    if (jobPending(j.status)) return;
-    out.classList.remove('muted', 'small');
+    clearInterval(tick);
+    if (jobPending(j.status)) {
+      out.textContent = '还在跑。关掉这个框也不影响，去「任务」页看结果。';
+      return;
+    }
+    out.classList.remove('muted');
+    delete out.dataset.phase;
     out.textContent = j.result || '(无输出)';
     if (j.status === 'done') { toast('执行成功'); invalidate(); } else { toast('执行失败，看输出'); }
   } catch (e) {
+    clearInterval(tick);
+    out.classList.remove('muted');
+    out.classList.add('term-bad');
     out.textContent = String(e.message || e);
   }
 }
@@ -134,33 +150,82 @@ async function tabShell(body, { m, id }) {
   const off = online(m.last_seen_at) !== 'on';
   body.innerHTML = `<div class="card">
     <div class="row between mb8"><div class="title" style="font-size:14px">在 ${h(m.name)} 上执行命令</div>
-    <span class="chip">login shell · $HOME</span></div>
-    <textarea id="cmd" class="mono" rows="3" placeholder="例如：claude update"></textarea>
-    <div class="row mt8" style="gap:8px">
-      <button id="run">执行 <span class="faint">⌘↵</span></button>
-      <select id="tmo" class="small"><option value="120">2 分钟</option><option value="600" selected>10 分钟</option><option value="1800">30 分钟</option></select>
-      <span class="help" style="margin:0">命令跑在登录 shell 里，跟你自己 SSH 进去一样能找到 nvm / brew。</span>
+    <span class="chip" title="命令跑在登录 shell 里，工作目录是 $HOME">login shell · $HOME</span></div>
+    ${off ? `<div class="banner warn mb8">这台机器最近没上报（${ago(m.last_seen_at)}）。命令会排队，等它上线后执行。</div>` : ''}
+    <textarea id="cmd" class="mono" rows="3" placeholder="claude update&#10;支持多行；⌘↵ 执行，↑ 取上一条"></textarea>
+    <div class="row mt8 between">
+      <div class="row" style="gap:8px">
+        <button id="run">执行 <span class="faint">⌘↵</span></button>
+        <select id="tmo" class="small" title="超时后整棵进程树会被终止"><option value="120">2 分钟</option><option value="600" selected>10 分钟</option><option value="1800">30 分钟</option></select>
+      </div>
+      <div class="row" style="gap:6px"><button class="ghost small" id="clearOut">清空</button></div>
     </div>
     <div class="row mt8" style="gap:6px;flex-wrap:wrap">${SNIPPETS.map(s => `<button class="ghost small" data-snip="${h(s[1])}">${h(s[0])}</button>`).join('')}</div>
-    <pre id="out" class="term mt12">${off ? '这台机器最近没上报，命令会排队等它上来。' : '就绪。'}</pre>
+    <pre id="out" class="term term-tall mt12"><span class="faint">就绪。命令输出会显示在这里，历史保留在本页。</span></pre>
+    <p class="help">超时会终止整棵进程树；输出上限 200KB。每条命令都会记入审计，也能在「任务」页回看。</p>
   </div>`;
+
+  const out = $('#out', body), ta = $('#cmd', body), runBtn = $('#run', body);
+  // Keep a scrollback so you can compare before/after an upgrade, and a command
+  // history so ↑ recalls what you just ran.
+  const hist = [];
+  let histAt = -1;
+  let virgin = true;
+  const append = (text, cls = '') => {
+    const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    if (virgin) { out.textContent = ''; virgin = false; }
+    const span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    out.appendChild(span);
+    if (atBottom) out.scrollTop = out.scrollHeight;
+    return span;
+  };
+
   const runIt = async () => {
-    const cmd = $('#cmd', body).value.trim();
+    const cmd = ta.value.trim();
     if (!cmd) return;
-    const out = $('#out', body);
-    out.textContent = `$ ${cmd}\n执行中…`;
-    $('#run', body).disabled = true;
+    hist.unshift(cmd); histAt = -1;
+    append(`$ ${cmd}\n`, 'term-cmd');
+    const status = append('执行中…\n', 'faint');
+    runBtn.disabled = true; runBtn.textContent = '执行中…';
     try {
       let j = await runRemote(id, cmd, { timeoutSec: +$('#tmo', body).value, waitSec: 60 });
-      if (jobPending(j.status)) { out.textContent = `$ ${cmd}\n${j.status === 'running' ? '执行中…' : '已排队，等机器接单…'}`; j = await awaitJob(j.id) || j; }
-      out.textContent = jobPending(j.status) ? `$ ${cmd}\n机器一直没接单：确认它在线，或者装 watch 模式。` : (j.result || '(无输出)');
-      if (j.status === 'done') invalidate();
-    } catch (e) { out.textContent = String(e.message || e); }
-    $('#run', body).disabled = false;
+      if (jobPending(j.status)) {
+        status.textContent = j.status === 'running' ? '机器已接单，执行中…\n' : '已排队，等机器接单…\n';
+        j = await awaitJob(j.id) || j;
+      }
+      if (jobPending(j.status)) {
+        status.textContent = '机器一直没接单：确认它在线，或用 `agentdeck install-schedule --watch` 开常驻模式。\n';
+        status.className = 'term-bad';
+      } else {
+        status.remove();
+        // The result already starts with the "$ cmd" echo from the agent.
+        const txt = (j.result || '(无输出)').replace(/^\$ .*\n/, '');
+        append(txt.endsWith('\n') ? txt : txt + '\n', j.status === 'failed' ? 'term-bad' : '');
+        if (j.status === 'done') invalidate();
+      }
+    } catch (e) {
+      status.textContent = String(e.message || e) + '\n';
+      status.className = 'term-bad';
+    }
+    runBtn.disabled = false; runBtn.innerHTML = '执行 <span class="faint">⌘↵</span>';
+    ta.value = ''; ta.focus();
   };
-  $('#run', body).onclick = runIt;
-  $('#cmd', body).onkeydown = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') runIt(); };
-  $$('[data-snip]', body).forEach(b => b.onclick = () => { $('#cmd', body).value = b.dataset.snip; $('#cmd', body).focus(); });
+
+  runBtn.onclick = runIt;
+  ta.onkeydown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runIt(); return; }
+    // ↑ on an empty box walks back through history, like a real shell.
+    if (e.key === 'ArrowUp' && (ta.value === '' || histAt >= 0) && hist.length) {
+      e.preventDefault(); histAt = Math.min(histAt + 1, hist.length - 1); ta.value = hist[histAt];
+    } else if (e.key === 'ArrowDown' && histAt >= 0) {
+      e.preventDefault(); histAt--; ta.value = histAt < 0 ? '' : hist[histAt];
+    }
+  };
+  $('#clearOut', body).onclick = () => { out.innerHTML = '<span class="faint">已清空。</span>'; virgin = true; hist.length = 0; histAt = -1; };
+  $$('[data-snip]', body).forEach(b => b.onclick = () => { ta.value = b.dataset.snip; ta.focus(); });
+  ta.focus();
 }
 
 const SNIPPETS = [
@@ -247,10 +312,29 @@ async function tabEnv(body, { m, ov, id }) {
 
 // ---- 任务 ----
 async function tabJobs(body, { jobs, id }) {
-  body.innerHTML = `<div class="card flush"><table><thead><tr><th>#</th><th>类型</th><th>参数</th><th>状态</th><th>创建</th><th>结果</th><th></th></tr></thead><tbody>
-  ${jobs.map(j => `<tr><td class="mono muted">${j.id}</td><td class="mono">${h(j.type)}</td><td class="mono xs faint">${h(JSON.stringify(j.payload))}</td><td>${statusPill(j.status)}</td><td class="muted small">${ago(j.created_at)}</td>
-   <td>${j.result ? `<details><summary class="small">输出</summary><pre>${h(j.result)}</pre></details>` : ''}</td><td class="right">${j.status === 'queued' ? `<button class="ghost small" data-cancel="${j.id}">取消</button>` : ''}</td></tr>`).join('') || emptyRow(7, '没有任务。在 CLI 页可以下发升级任务。')}</tbody></table></div>`;
+  // One row per job with the command inline, and output in a full-width
+  // expander underneath. Cramming output into a narrow cell produced a
+  // scrollbar in a 45px-wide sliver.
+  body.innerHTML = `<div class="card flush"><table class="jobs"><thead><tr><th class="c-id">#</th><th>命令 / 参数</th><th class="c-st">状态</th><th class="c-when">创建</th><th class="c-act"></th></tr></thead><tbody>
+  ${jobs.map(j => {
+    const cmd = jobCmd(j);
+    const rowspanOut = j.result ? `<tr class="out-row"><td></td><td colspan="4"><details><summary class="small">输出 <span class="faint">${j.result.split('\n').length} 行</span></summary><pre class="term mt8">${h(j.result)}</pre></details></td></tr>` : '';
+    return `<tr><td class="mono muted c-id">${j.id}</td>
+     <td><div class="mono jobcmd">${h(cmd)}</div><div class="faint xs">${h(j.type)}</div></td>
+     <td class="c-st">${statusPill(j.status)}</td><td class="muted small c-when nowrap">${ago(j.created_at)}</td>
+     <td class="right c-act">${jobPending(j.status) ? `<button class="ghost small" data-cancel="${j.id}">取消</button>` : ''}</td></tr>${rowspanOut}`;
+  }).join('') || emptyRow(5, '没有任务。在 CLI 页点升级，或者到终端页执行命令。')}</tbody></table></div>`;
   $$('[data-cancel]', body).forEach(b => b.onclick = async () => { await api('DELETE', `/api/admin/jobs/${b.dataset.cancel}`); reroute(); });
+}
+
+// Show a shell job's command directly; other job types show their payload.
+function jobCmd(j) {
+  const p = j.payload || {};
+  if (j.type === 'shell' && p.cmd) return p.cmd;
+  if (j.type === 'npm_upgrade' && p.package) return `npm i -g ${p.package}@${p.version || 'latest'}`;
+  if (j.type === 'brew_upgrade' && p.formula) return `brew upgrade ${p.formula}`;
+  if (j.type === 'echo') return `echo ${p.message || ''}`;
+  return JSON.stringify(p);
 }
 
 // ---- 日志 ----

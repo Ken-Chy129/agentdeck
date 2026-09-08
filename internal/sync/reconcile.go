@@ -500,7 +500,14 @@ func runShell(ctx context.Context, cmdStr, cwd string, timeoutSec int) (string, 
 		cmd.Dir, _ = os.UserHomeDir()
 	}
 	cmd.Env = append(os.Environ(), "AGENTDECK_JOB=1", "CI=1", "TERM=dumb", "NO_COLOR=1")
-	cmd.Stdin = nil
+	// Give stdin an immediate EOF. A nil Stdin also yields EOF, but being
+	// explicit documents the intent: anything that tries to prompt (e.g.
+	// `claude update` asking to confirm) should fail fast instead of hanging
+	// until the timeout.
+	if devNull, err := os.Open(os.DevNull); err == nil {
+		defer devNull.Close()
+		cmd.Stdin = devNull
+	}
 	isolate(cmd)
 
 	var buf bytes.Buffer

@@ -19,6 +19,8 @@ code{background:var(--bg-3);border:1px solid var(--line);border-radius:4px;paddi
 pre code{background:none;border:0;padding:0}
 ::selection{background:var(--accent-bg)}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:8px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#3a4356}
+::-webkit-scrollbar-corner,::-webkit-scrollbar-track{background:transparent}
 
 /* ---- layout ---- */
 #side{width:212px;flex:none;background:var(--bg-1);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
@@ -70,6 +72,9 @@ p.muted{margin:8px 0}
 .card:not(.flush) > table:first-child th{background:transparent;padding-top:4px;padding-bottom:8px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
 .cols{display:flex;gap:18px;align-items:flex-start}.cols>*{flex:1;min-width:0}.cols>.narrow{flex:0 0 320px}.cols>.wide{flex:1.6}
+/* Below ~1200px the 1.6:1 split squeezes the right column until its table
+   overflows; stack instead of showing a scrollbar in a 273px sliver. */
+@media (max-width:1200px){.cols{flex-direction:column}.cols>.narrow,.cols>.wide{flex:1 1 auto;width:100%}}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .stat{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px 12px;position:relative}
 .stat b{display:block;font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1.2}.stat b small{font-size:14px;color:var(--muted);font-weight:500}
@@ -87,6 +92,17 @@ td.right,th.right{text-align:right}td.c,th.c{text-align:center}
 .nowrap{white-space:nowrap}
 .envtable thead th{position:sticky;top:0;background:var(--bg-2);z-index:1;box-shadow:0 1px 0 var(--line)}
 .envtable td{vertical-align:middle}.envtable tr[hidden]{display:none}
+
+/* jobs table: fixed narrow columns so the command gets the room, and the
+   output expander spans the full width instead of a cramped cell */
+.jobs .c-id{width:44px}.jobs .c-st{width:96px}.jobs .c-when{width:88px}.jobs .c-act{width:80px}
+.jobs .jobcmd{font-size:12.5px;color:var(--fg);word-break:break-word;line-height:1.5}
+.jobs tr.out-row td{border-bottom:1px solid var(--line);padding-top:0}
+.jobs tr.out-row pre{max-height:340px}
+.jobs tr:not(.out-row) td{border-bottom:0}
+.jobs tr.out-row summary{color:var(--muted)}
+/* Long absolute paths shouldn't force a table to overflow on narrow screens. */
+td.mono.xs{word-break:break-all}
 .envtable td.c{min-width:120px}
 .cellbox{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .sub-note{color:var(--faint);font-size:11px;margin-top:3px}
@@ -95,7 +111,7 @@ td.right,th.right{text-align:right}td.c,th.c{text-align:center}
 .muted{color:var(--muted)}.faint{color:var(--faint)}.small{font-size:12px}.xs{font-size:11px}
 .behind{color:var(--warn)}.bad-text{color:var(--bad)}.ok-text{color:var(--ok)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row.between{justify-content:space-between}.row.top{align-items:flex-start}.row.end{justify-content:flex-end}.row.nowrap{flex-wrap:nowrap}
-.mt0{margin-top:0}.mt8{margin-top:8px}.mt16{margin-top:16px}.mb8{margin-bottom:8px}.mb12{margin-bottom:12px}
+.mt0{margin-top:0}.mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}.mb8{margin-bottom:8px}.mb12{margin-bottom:12px}
 .grow{flex:1;min-width:0}
 .title{font-size:15.5px;font-weight:600}
 .link-plain{color:inherit}
@@ -106,7 +122,9 @@ button:hover{background:var(--accent)}
 button.ghost{background:transparent;color:var(--fg-1);border-color:var(--line-2)}button.ghost:hover{background:var(--bg-3);color:var(--fg)}
 button.danger{background:transparent;color:var(--bad);border-color:rgba(240,106,106,.4)}button.danger:hover{background:var(--bad-bg)}
 button.small{padding:3px 9px;font-size:12px}
-button.link{background:none;border:0;color:var(--accent);padding:0;font-weight:500}button.link:hover{background:none;text-decoration:underline}
+/* Inline text buttons: keep them looking like links but give them a real
+   click target (they were 17px tall, which is fiddly to hit). */
+button.link{background:none;border:0;color:var(--accent);padding:3px 2px;font-weight:500;min-height:24px;line-height:1.4}button.link:hover{background:none;text-decoration:underline}
 button:disabled{opacity:.45;cursor:default}
 input,textarea,select{background:var(--bg);color:var(--fg);border:1px solid var(--line-2);border-radius:var(--r-s);padding:6px 10px;font-size:13px;font-family:inherit;outline:none;transition:border-color .12s,box-shadow .12s}
 input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
@@ -129,7 +147,11 @@ select{padding-right:26px}
 .kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--fg-1)}
 
 /* ---- tabs ---- */
-.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
+/* Tabs can overflow on narrow screens, but `overflow-x:auto` alone reserves a
+   scrollbar gutter that shows up as a stray sliver next to the tab row.
+   Hide the bar itself and keep the row scrollable by drag/wheel. */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.tabs::-webkit-scrollbar{height:0;width:0;display:none}
 .tabs button{background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 12px;font-weight:500;margin-bottom:-1px;white-space:nowrap}
 .tabs button:hover{color:var(--fg);background:transparent}.tabs button.active{color:var(--fg);border-color:var(--accent)}
 
@@ -138,6 +160,13 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);p
 pre.fill{margin:0;max-height:62vh}
 /* remote command output: terminal-ish, scrolls, keeps long lines readable */
 .term{background:#0b0d11;border:1px solid var(--line-2);border-radius:var(--r-s);padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.6;color:#c9d3e0;white-space:pre-wrap;word-break:break-word;max-height:48vh;overflow:auto;margin:0}
+/* terminal scrollback: tall enough to read output without immediately
+   scrolling, with the prompt line and failures visually distinct */
+.term-tall{min-height:220px;max-height:56vh}
+.term-cmd{color:var(--accent);font-weight:500}
+.term-bad{color:var(--bad)}
+.banner{border-radius:var(--r-s);padding:9px 12px;font-size:12.5px;border:1px solid var(--line-2);color:var(--fg-1)}
+.banner.warn{background:var(--warn-bg);border-color:rgba(232,179,61,.35);color:#e8cd8f}
 textarea.mono[rows]{min-height:0}
 .filetree{display:flex;gap:14px;align-items:stretch}
 .filetree ul{list-style:none;margin:0;padding:0;min-width:220px;max-width:280px}
@@ -157,6 +186,8 @@ details summary::before{content:"";width:0;height:0;border:4px solid transparent
 details[open] summary::before{transform:rotate(90deg)}
 details summary:hover{color:var(--fg)}
 .log-item{padding:8px 0;border-bottom:1px solid var(--line)}.log-item:last-child{border-bottom:0}
+/* Sync-log JSON is wide; wrap it instead of scrolling a nested box. */
+.log-item pre{white-space:pre-wrap;word-break:break-word;max-height:360px}
 
 /* ---- login / toast / modal ---- */
 .login{max-width:380px;margin:14vh auto}
@@ -173,8 +204,10 @@ details summary:hover{color:var(--fg)}
 .empty{color:var(--muted);padding:22px 16px;text-align:center;font-size:13px}
 .empty code{font-size:12px}
 .envtable td.c{min-width:104px;padding-left:6px;padding-right:6px}
-.envtable td:first-child{position:sticky;left:0;background:var(--bg-2);z-index:1}
-.envtable thead th:first-child{z-index:2;left:0}
+/* Sticky first column needs an edge, otherwise scrolled cells slide
+   underneath it with no visual break. */
+.envtable td:first-child{position:sticky;left:0;background:var(--bg-2);z-index:1;box-shadow:1px 0 0 var(--line)}
+.envtable thead th:first-child{z-index:2;left:0;box-shadow:1px 0 0 var(--line),0 1px 0 var(--line)}
 .envtable .sub-note{white-space:nowrap}
 
 .stat.tri{display:flex;gap:18px;align-items:flex-end}.stat.tri>div b{font-size:22px}
