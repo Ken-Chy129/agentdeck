@@ -205,28 +205,67 @@ func npmPrefixOf(realPath string) string {
 // shadowedCopies walks $PATH for other executables with the same name. The
 // first hit is the one that runs; anything after it is dead weight that makes
 // "which version am I actually using?" confusing.
+//
+// Distinct PATH entries routinely point at one file: /bin is a symlink to
+// /usr/bin on every merged-/usr distro, and $PATH lists both. Reporting
+// "shadowed 3x" for two real copies sends you hunting for an install that
+// doesn't exist, so we dedupe by the file each path resolves to.
 func shadowedCopies(bin, active string) []string {
 	var out []string
-	seen := map[string]bool{active: true}
+	seenPath := map[string]bool{active: true}
+	// os.SameFile compares device+inode, so hardlinks and symlink aliases of
+	// the same binary count once. Keep the FileInfos we've accepted so far.
+	var seenFiles []os.FileInfo
+	if fi, ok := resolvedInfo(active); ok {
+		seenFiles = append(seenFiles, fi)
+	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir == "" {
 			continue
 		}
 		p := filepath.Join(dir, bin)
-		if seen[p] {
+		if seenPath[p] {
 			continue
 		}
+		seenPath[p] = true
 		info, err := os.Stat(p)
 		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 			continue
 		}
-		seen[p] = true
+		fi, ok := resolvedInfo(p)
+		if ok {
+			dup := false
+			for _, prev := range seenFiles {
+				if os.SameFile(prev, fi) {
+					dup = true
+					break
+				}
+			}
+			if dup {
+				continue // same binary reached through another PATH entry
+			}
+			seenFiles = append(seenFiles, fi)
+		}
 		out = append(out, p)
 		if len(out) >= 4 {
 			break
 		}
 	}
 	return out
+}
+
+// resolvedInfo stats the file a path ultimately points at, following symlinks,
+// so aliases of one binary can be recognised as the same file.
+func resolvedInfo(path string) (os.FileInfo, bool) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, false
+	}
+	fi, err := os.Stat(real)
+	if err != nil {
+		return nil, false
+	}
+	return fi, true
 }
 
 // upgradeCommand returns the command that actually upgrades this tool here.
