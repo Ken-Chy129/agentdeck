@@ -19,7 +19,7 @@ import (
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 )
 
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 // Config lives at ~/.config/agentdeck/config.json (0600).
 type Config struct {
