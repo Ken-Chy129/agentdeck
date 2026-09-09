@@ -218,6 +218,12 @@ func Run(ctx context.Context, c *Config, opt Options) (*protocol.SyncReport, err
 			logf("[dry-run] would run job #%d %s %s", j.ID, j.Type, string(j.Payload))
 			continue
 		}
+		// A "sync now" request picked up by the sync itself is already
+		// satisfied: we are that sync. Running it here would recurse.
+		if j.Type == protocol.JobSync {
+			rep.Jobs = append(rep.Jobs, protocol.JobResult{ID: j.ID, Status: "done", Output: "satisfied by this sync"})
+			continue
+		}
 		logf("job #%d %s %s", j.ID, j.Type, string(j.Payload))
 		out, err := runJob(ctx, j)
 		jr := protocol.JobResult{ID: j.ID, Status: "done", Output: out}
@@ -543,4 +549,53 @@ func shell(ctx context.Context, name string, args ...string) (string, error) {
 		out = out[:32*1024] + "\n…(truncated)"
 	}
 	return out, err
+}
+
+// Summary renders a sync report the way `agentdeck sync` prints it, so a
+// console-triggered sync shows the same thing you'd see on the machine.
+func Summary(rep *protocol.SyncReport) string {
+	counts := map[string]int{}
+	for _, r := range rep.Resources {
+		counts[r.Kind+":"+r.Action]++
+	}
+	var parts []string
+	for _, kind := range []string{"skill", "env", "config"} {
+		var kp []string
+		for _, a := range []string{"applied", "removed", "unchanged", "failed"} {
+			if n := counts[kind+":"+a]; n > 0 {
+				kp = append(kp, fmt.Sprintf("%d %s", n, a))
+			}
+		}
+		if len(kp) > 0 {
+			parts = append(parts, kind+"("+strings.Join(kp, ", ")+")")
+		}
+	}
+	if len(parts) == 0 {
+		parts = []string{"nothing assigned"}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "sync done in %s: %s\n", rep.Duration, strings.Join(parts, " "))
+	for _, r := range rep.Resources {
+		if r.Action == "unchanged" {
+			continue
+		}
+		line := fmt.Sprintf("  %s/%s %s", r.Kind, r.Name, r.Action)
+		if detail := firstNonEmpty(r.Error, r.Detail); detail != "" {
+			line += ": " + detail
+		}
+		b.WriteString(line + "\n")
+	}
+	if rep.Error != "" {
+		b.WriteString("  ! " + rep.Error + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

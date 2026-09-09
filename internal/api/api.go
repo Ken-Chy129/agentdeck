@@ -61,6 +61,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/machines/{id}/jobs", s.withAdmin(s.machineJobs))
 	mux.HandleFunc("POST /api/admin/machines/{id}/jobs", s.withAdmin(s.createJob))
 	mux.HandleFunc("POST /api/admin/machines/{id}/shell", s.withAdmin(s.runShell))
+	mux.HandleFunc("POST /api/admin/machines/{id}/sync", s.withAdmin(s.syncNow))
 	mux.HandleFunc("GET /api/admin/jobs/{id}", s.withAdmin(s.getJob))
 	mux.HandleFunc("POST /api/admin/machines/{id}/import-env", s.withAdmin(s.requestImport))
 	mux.HandleFunc("DELETE /api/admin/jobs/{id}", s.withAdmin(s.cancelJob))
@@ -672,7 +673,7 @@ func (s *Server) machineJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, jobs)
 }
 
-var allowedJobs = map[string]bool{protocol.JobNpmUpgrade: true, protocol.JobBrewUpgrade: true, protocol.JobEcho: true, protocol.JobShell: true}
+var allowedJobs = map[string]bool{protocol.JobNpmUpgrade: true, protocol.JobBrewUpgrade: true, protocol.JobEcho: true, protocol.JobShell: true, protocol.JobSync: true}
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 	j, err := s.st.JobByID(r.Context(), pathID(r))

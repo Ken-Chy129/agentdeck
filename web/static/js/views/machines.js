@@ -1,4 +1,4 @@
-import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill, runRemote, awaitJob, jobPending } from '../core.js';
+import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill, runRemote, syncNow, awaitJob, jobPending } from '../core.js';
 
 const AGENT_TOOLS = ['claude', 'codex', 'gemini', 'hermes', 'opencode', 'cursor-agent', 'gh', 'lark-cli', 'bytedcli'];
 
@@ -7,7 +7,7 @@ export async function machinesView() {
   const ms = ov.machines;
   const latest = await npmLatest(ms.flatMap(m => (m.inventory?.tools || []).map(t => t.package)));
 
-  app.innerHTML = pageHeader({ title: '机器', desc: '每台机器装了 agentdeck CLI，按计划任务每 15 分钟同步一次；这里看到的是它们最近一次上报的状态。', actions: '<button id="enroll">+ 添加机器</button>' }) + `
+  app.innerHTML = pageHeader({ title: '机器', desc: '每台机器装了 agentdeck CLI，按计划任务每 15 分钟同步一次；这里看到的是它们最近一次上报的状态。等不及就点「立即同步」。', actions: '<button class="ghost" id="syncAll">立即同步全部</button><button id="enroll">+ 添加机器</button>' }) + `
     <div id="enrollBox"></div>
     <div class="grid">${ms.map(m => machineCard(ov, m, latest)).join('') || empty('还没有机器。点「添加机器」生成一次性注册 token。')}</div>`;
   // Upgrade straight from the list: no need to open each machine.
@@ -17,6 +17,21 @@ export async function machinesView() {
     const cmds = (m.inventory?.tools || []).filter(t => { const lv = t.package ? latest[t.package] : ''; return lv && semverLt(t.version, lv) && upgradeCmd(t); });
     execModal(m.id, cmds.map(t => upgradeCmd(t)).join(' && '), `升级 ${m.name}：${cmds.map(t => t.name).join(' / ')}`);
   });
+  // Per-machine sync from the list, so you don't have to open each card.
+  $$('[data-sync]').forEach(b => b.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const m = ms.find(x => x.id === b.dataset.sync);
+    syncModal(m.id, m.name);
+  });
+  $('#syncAll').onclick = async () => {
+    if (!ms.length) return;
+    if (!await ask('立即同步全部', `给 ${ms.length} 台机器各排一个同步任务。在 watch 模式的机器几秒内开始，其余会排队到下次计划同步。`, '同步')) return;
+    const rs = await Promise.allSettled(ms.map(m => syncNow(m.id, { waitSec: 1 })));
+    const bad = rs.filter(r => r.status === 'rejected').length;
+    toast(bad ? `已排入 ${rs.length - bad} 台，${bad} 台失败` : `已给 ${rs.length} 台机器排入同步`, !!bad);
+    invalidate();
+    setTimeout(reroute, 3000);
+  };
   $('#enroll').onclick = async () => {
     const r = await api('POST', '/api/admin/enroll-tokens', { note: 'from console' });
     $('#enrollBox').innerHTML = `<div class="card"><div class="title" style="font-size:14px">在新机器上执行 <span class="muted small">（token 一次有效）</span></div>
@@ -38,7 +53,7 @@ function machineCard(ov, m, latest) {
       <a href="#/machines/${m.id}" class="title link-plain"><span class="dot ${online(m.last_seen_at)}"></span>${h(m.name)}</a>
       <span class="faint xs mono">${h(inv.os || m.os)}/${h(inv.arch || m.arch)}</span></div>
     <div class="row mt8 mb12" style="gap:6px">
-      <span class="chip">同步 <b>${ago(m.last_seen_at)}</b></span>
+      <span class="chip">同步 <b>${ago(m.last_seen_at)}</b></span><button class="ghost small" data-sync="${m.id}" title="让这台机器现在跑一次 agentdeck sync">立即同步</button>
       <span class="chip">${counts.skill} skill</span><span class="chip">${counts.config} 配置</span><span class="chip">${counts.env} 变量</span>
       ${warn ? `<span class="chip ov">${warn} 待同步</span>` : ''}${behind.length ? `<span class="chip ov">${behind.length} CLI 可升级</span><button class="small" data-upall="${m.id}">升级</button>` : ''}
     </div>
@@ -59,12 +74,13 @@ export async function machineDetail(id, tab) {
 
   app.innerHTML = crumb('#/machines', '机器') + pageHeader({
     title: `<span class="dot ${online(m.last_seen_at)}"></span>${h(m.name)}`, sub: `<span class="mono">${h(m.id)}</span>`,
-    actions: '<button class="ghost small" id="rename">重命名</button><button class="danger small" id="del">删除机器</button>' }) + `
+    actions: '<button class="small" id="syncNow">立即同步</button><button class="ghost small" id="rename">重命名</button><button class="danger small" id="del">删除机器</button>' }) + `
   <div class="meta-line"><span>主机 <b class="mono">${h(inv.hostname || m.hostname)}</b></span><span>系统 <b>${h(inv.os || m.os)}/${h(inv.arch || m.arch)}</b></span><span>最近同步 <b>${ago(m.last_seen_at)}</b></span><span>配置采集 <b>${ago(m.snapshot_at)}</b></span>${(inv.runtimes || []).slice(0, 6).map(r => `<span>${h(r.name)} <b>${h(r.version)}</b></span>`).join('')}</div>
   <div class="tabs">${TABS.map(([k, l]) => `<button class="${k === tab ? 'active' : ''}" data-tab="${k}">${l}${badge(k, ov, m, jobs)}</button>`).join('')}</div>
   <div id="tabBody"></div>`;
 
   $$('[data-tab]').forEach(b => b.onclick = () => { location.hash = `#/machines/${id}/${b.dataset.tab}`; });
+  $('#syncNow').onclick = () => syncModal(id, m.name);
   $('#rename').onclick = async () => { const n = prompt('新名称', m.name); if (n && n !== m.name) { await api('PATCH', `/api/admin/machines/${id}`, { name: n }); invalidate(); reroute(); } };
   $('#del').onclick = async () => { if (await ask('删除机器', `删除 <b>${h(m.name)}</b>？该机器的 token 立刻失效，分发记录一并删除。`, '删除', true)) { await api('DELETE', `/api/admin/machines/${id}`); location.hash = '#/machines'; } };
 
@@ -105,25 +121,26 @@ async function tabCli(body, { m, id }) {
   };
 }
 
-// ---- remote exec modal ----
-// Runs a command on the machine and streams the result into a modal. Used by
-// the upgrade buttons so you never have to SSH in for a version bump.
-export async function execModal(id, cmd, title) {
-  modal(`<h3>${h(title || '在机器上执行')}</h3>
-    <pre class="mono" style="white-space:pre-wrap;margin-top:0">$ ${h(cmd)}</pre>
+// ---- remote job modal ----
+// Queues work on the machine and streams the result into a modal. Shared by the
+// upgrade buttons and「立即同步」so neither needs an SSH session.
+async function jobModal({ id, title, subject, hint, start, okToast = '执行成功', failToast = '执行失败，看输出' }) {
+  modal(`<h3>${h(title)}</h3>
+    ${subject}
     <div id="execOut" class="term term-tall muted">等机器接单…（在线的话几秒内开始）</div>
-    <p class="help" id="execHint">升级可能要跑 1-2 分钟。关掉这个框不会中断执行，稍后可在「任务」页看结果。</p>
-    <div class="row right mt12"><a class="crumb" id="execJobs" href="#/machines/${id}/jobs" style="margin:0">去任务页 →</a><button class="ghost" onclick="closeModal()">关闭</button></div>`);
+    <p class="help" id="execHint">${hint}</p>
+    <div class="row right mt12"><a class="crumb" id="execJobs" href="#/machines/${id}/jobs" style="margin:0">去任务页 →</a><button class="ghost" id="execClose">关闭</button></div>`);
+  $('#execClose').onclick = closeModal;
   const out = $('#execOut');
   const started = Date.now();
-  // Long upgrades look frozen without a ticking clock.
+  // Long jobs look frozen without a ticking clock.
   const tick = setInterval(() => {
     if (!document.body.contains(out) || !out.classList.contains('muted')) return clearInterval(tick);
     const s = Math.round((Date.now() - started) / 1000);
     out.textContent = out.dataset.phase ? `${out.dataset.phase}（已 ${s}s）` : `等机器接单…（已 ${s}s）`;
   }, 1000);
   try {
-    let j = await runRemote(id, cmd, { waitSec: 60 });
+    let j = await start();
     if (jobPending(j.status)) {
       out.dataset.phase = j.status === 'running' ? '机器已接单，执行中…' : '已排队，等机器接单（它可能不在 watch 模式）';
       j = await awaitJob(j.id, { tries: 150, everyMs: 2000 }) || j;
@@ -136,13 +153,36 @@ export async function execModal(id, cmd, title) {
     out.classList.remove('muted');
     delete out.dataset.phase;
     out.textContent = j.result || '(无输出)';
-    if (j.status === 'done') { toast('执行成功'); invalidate(); } else { toast('执行失败，看输出'); }
+    if (j.status === 'done') { toast(okToast); invalidate(); } else { toast(failToast, true); }
   } catch (e) {
     clearInterval(tick);
     out.classList.remove('muted');
     out.classList.add('term-bad');
     out.textContent = String(e.message || e);
   }
+}
+
+// Runs a command on the machine. Used by the upgrade buttons.
+export async function execModal(id, cmd, title) {
+  return jobModal({
+    id, title: title || '在机器上执行',
+    subject: `<pre class="mono" style="white-space:pre-wrap;margin-top:0">$ ${h(cmd)}</pre>`,
+    hint: '升级可能要跑 1-2 分钟。关掉这个框不会中断执行，稍后可在「任务」页看结果。',
+    start: () => runRemote(id, cmd, { waitSec: 60 }),
+  });
+}
+
+// Asks the machine to reconcile now instead of waiting for its next scheduled
+// sync. Watching machines start within seconds; the rest pick it up on their
+// next scheduled run, so the job just stays queued.
+export async function syncModal(id, name) {
+  return jobModal({
+    id, title: `立即同步${name ? '：' + h(name) : ''}`,
+    subject: '<pre class="mono" style="white-space:pre-wrap;margin-top:0">$ agentdeck sync</pre>',
+    hint: '在 watch 模式的机器几秒内开始；否则会排队，等它下一次计划同步时执行。',
+    start: () => syncNow(id, { waitSec: 60 }),
+    okToast: '同步完成', failToast: '同步失败，看输出',
+  });
 }
 
 // ---- terminal ----
@@ -334,6 +374,7 @@ function jobCmd(j) {
   if (j.type === 'npm_upgrade' && p.package) return `npm i -g ${p.package}@${p.version || 'latest'}`;
   if (j.type === 'brew_upgrade' && p.formula) return `brew upgrade ${p.formula}`;
   if (j.type === 'echo') return `echo ${p.message || ''}`;
+  if (j.type === 'sync') return 'agentdeck sync';
   return JSON.stringify(p);
 }
 

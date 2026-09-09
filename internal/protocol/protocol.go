@@ -163,6 +163,9 @@ const (
 	JobBrewUpgrade = "brew_upgrade" // {"formula":"gh"}
 	JobEcho        = "echo"         // {"message":"..."} smoke test
 	JobShell       = "shell"        // {"cmd":"npm i -g x@latest","cwd":"~","timeout_sec":600}
+	// JobSync asks the machine to run a full reconcile right now instead of
+	// waiting for its next scheduled sync. Payload is empty.
+	JobSync = "sync"
 )
 
 // ---- config collection (client -> server) ----

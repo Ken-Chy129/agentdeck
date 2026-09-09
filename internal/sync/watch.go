@@ -67,7 +67,14 @@ func Watch(ctx context.Context, c *Config, opt WatchOptions) error {
 		}
 		backoff = time.Second
 
+		// A batch can hold several sync requests (impatient clicking); one
+		// reconcile satisfies them all.
+		var syncJobs []protocol.Job
 		for _, j := range resp.Jobs {
+			if j.Type == protocol.JobSync {
+				syncJobs = append(syncJobs, j)
+				continue
+			}
 			logf("job #%d %s %s", j.ID, j.Type, summarize(j))
 			out, jerr := runJob(ctx, j)
 			res := protocol.JobResult{ID: j.ID, Status: "done", Output: out}
@@ -81,6 +88,27 @@ func Watch(ctx context.Context, c *Config, opt WatchOptions) error {
 				logf("job #%d %s", j.ID, res.Status)
 			}
 		}
+
+		if len(syncJobs) > 0 {
+			logf("sync requested from console (%d job(s))", len(syncJobs))
+			out, serr := runSyncJob(ctx, c)
+			status := "done"
+			if serr != nil {
+				status = "failed"
+				out += "\nerror: " + serr.Error()
+			}
+			// The manual run counts as the periodic one, so we don't reconcile
+			// twice back to back.
+			if opt.SyncEvery > 0 {
+				nextSync = time.Now().Add(opt.SyncEvery)
+			}
+			for _, j := range syncJobs {
+				if err := cl.JobResult(ctx, protocol.JobResult{ID: j.ID, Status: status, Output: out}); err != nil {
+					logf("job #%d: reporting result failed: %v", j.ID, err)
+				}
+			}
+			logf("sync job %s", status)
+		}
 	}
 }
 
@@ -91,4 +119,14 @@ func summarize(j protocol.Job) string {
 		s = s[:120] + "…"
 	}
 	return s
+}
+
+// runSyncJob performs the reconcile a console "sync now" asks for and returns a
+// human-readable summary for the job output.
+func runSyncJob(ctx context.Context, c *Config) (string, error) {
+	rep, err := Run(ctx, c, Options{Inventory: true, Log: func(string, ...any) {}})
+	if err != nil {
+		return "", err
+	}
+	return Summary(rep), nil
 }

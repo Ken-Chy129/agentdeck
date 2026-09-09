@@ -176,6 +176,13 @@ export async function runRemote(machineID, cmd, { timeoutSec = 600, waitSec = 60
   return api('POST', `/api/admin/machines/${machineID}/shell`, { cmd, timeout_sec: timeoutSec, wait_sec: waitSec });
 }
 
+// Ask a machine to reconcile right now. The server wakes its long poll and
+// holds the request until the sync finishes, so this usually returns with the
+// result already in hand.
+export async function syncNow(machineID, { waitSec = 60 } = {}) {
+  return api('POST', `/api/admin/machines/${machineID}/sync`, { wait_sec: waitSec });
+}
+
 // Poll a job until it reaches a terminal state. 'running' means the machine
 // picked it up and is still working, so we keep waiting.
 export async function awaitJob(jobID, { tries = 60, everyMs = 2000 } = {}) {
