@@ -1,69 +1,71 @@
 # AgentDeck
 
-Personal control plane for my coding-agent setup across machines — skills today, MCP servers,
-CLI configs and credentials next: a web console on my VPS
-plus a tiny `agentdeck` CLI on every machine. Machines pull; the server never needs to reach them.
+用于跨机器管理编程智能体环境的个人控制平面。目前支持技能管理，后续将支持 MCP 服务器、
+CLI 配置和凭据管理：在 VPS 上运行一个 Web 控制台，并在每台机器上安装轻量的
+`agentdeck` CLI。由机器主动拉取数据，服务器无需主动连接机器。
 
 ```
-browser ──▶ agentdeckd (Go, SQLite, embedded web UI)  ◀── HTTPS ── agentdeck sync (each machine)
-              skills · versions · machines · assignments · jobs · sync logs
+浏览器 ──▶ agentdeckd（Go、SQLite、内嵌 Web UI） ◀── HTTPS ── agentdeck sync（每台机器）
+              技能 · 版本 · 机器 · 分配关系 · 任务 · 同步日志
 ```
 
-## What it does
+## 功能
 
-- **Skill library**: versioned, content-addressed skill bundles. Create/edit in the browser,
-  upload a tar.gz, or `agentdeck push ~/.agents/skills/foo` from any machine.
-- **Distribution**: assign skills to machines (per-machine page or the matrix view).
-  `agentdeck sync` installs/updates/removes so `~/.agents/skills/` matches the server, then
-  symlinks into `~/.claude/skills/`. Server wins; local edits are backed up to
-  `~/.agents/skills/.agentdeck-backup/` first. Skills that are not assigned are never touched.
-- **CLI inventory**: each sync reports node/npm/brew/go/… versions and agent CLIs
-  (claude, codex, gemini, …) with their install source and path. The console compares against
-  npm and shows what is behind, with a copyable upgrade command.
-- **Jobs**: queue `npm_upgrade` / `brew_upgrade` for a machine; it runs on the next sync and
-  posts the output back. Job types are a whitelist and arguments are validated on the client.
+- **技能库**：支持版本管理和内容寻址的技能包。可以在浏览器中创建或编辑、上传 tar.gz，
+  也可以在任意机器上执行 `agentdeck push ~/.agents/skills/foo`。
+- **分发**：通过单台机器页面或矩阵视图将技能分配给机器。`agentdeck sync` 会执行安装、
+  更新或删除，使 `~/.agents/skills/` 与服务器保持一致，然后创建符号链接到
+  `~/.claude/skills/`。发生冲突时以服务器为准；本地修改会先备份至
+  `~/.agents/skills/.agentdeck-backup/`。未分配的技能不会被改动。
+- **CLI 清单**：每次同步都会上报 node/npm/brew/go/… 的版本，以及智能体 CLI
+  （claude、codex、gemini 等）的安装来源和路径。控制台会与 npm 上的版本进行比较，
+  标出需要升级的项目，并提供可复制的升级命令。
+- **任务**：可以为机器加入 `npm_upgrade` / `brew_upgrade` 升级任务；任务会在下次同步时
+  执行并回传输出。任务类型采用白名单机制，参数由客户端校验。
 
-## Server
+## 服务端
 
 ```sh
-docker compose -f deploy/docker-compose.yml up -d --build   # listens on 127.0.0.1:8480
-cat /opt/agentdeck/data/admin_token                          # paste into the web login
+docker compose -f deploy/docker-compose.yml up -d --build   # 监听 127.0.0.1:8480
+cat /opt/agentdeck/data/admin_token                          # 将令牌粘贴到 Web 登录页
 ```
 
-Put it behind Caddy/nginx with TLS (see `deploy/Caddyfile.snippet`). Env: `AGENTDECK_ADDR`,
-`AGENTDECK_DATA`, `AGENTDECK_ADMIN_TOKEN` (optional; otherwise generated into `data/admin_token`).
+请通过 Caddy/nginx 配置 TLS 反向代理（参见 `deploy/Caddyfile.snippet`）。可用环境变量：
+`AGENTDECK_ADDR`、`AGENTDECK_DATA`、`AGENTDECK_ADMIN_TOKEN`（可选；未设置时会自动生成并写入
+`data/admin_token`）。
 
-## Machine
+## 客户端机器
 
 ```sh
-go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest   # or grab a binary from dist/
+go install github.com/Ken-Chy129/agentdeck/cmd/agentdeck@latest   # 也可以使用 dist/ 中的二进制文件
 agentdeck login https://deck.example.com <enroll-token> --name mbp
-agentdeck sync                     # once
-agentdeck install-schedule --watch # stay online: console commands run in seconds
-agentdeck install-schedule         # or timer-only: sync every 15 min
+agentdeck sync                     # 手动同步一次
+agentdeck install-schedule --watch # 保持在线：数秒内执行控制台命令
+agentdeck install-schedule         # 或仅使用定时器：每 15 分钟同步一次
 agentdeck push ~/.agents/skills/my-skill --note "tweak"
 agentdeck status
 agentdeck inventory
 ```
 
-`--watch` keeps the CLI resident and long-polls the server, so a command typed in
-the console's 终端 tab (or an upgrade button) runs within a couple of seconds. The
-machine always dials out, so this works from boxes the server can't reach. On Linux
-run `loginctl enable-linger $USER` so the unit survives logout.
+`--watch` 会让 CLI 常驻并长轮询服务器，因此在控制台的「终端」标签页中输入的命令
+（或通过升级按钮触发的命令）通常会在数秒内执行。机器始终主动连接服务器，因此即使服务器
+无法直接访问机器也能正常工作。在 Linux 上，请执行 `loginctl enable-linger $USER`，
+以确保退出登录后服务仍能继续运行。
 
-Config: `~/.config/agentdeck/config.json` (0600). Lockfile: `~/.agents/skills/.agentdeck-lock.json`.
+配置文件：`~/.config/agentdeck/config.json`（权限为 0600）。锁文件：
+`~/.agents/skills/.agentdeck-lock.json`。
 
-## Layout
+## 目录结构
 
 ```
-cmd/agentdeckd        server entrypoint
-cmd/agentdeck         machine CLI
-internal/api         HTTP handlers (/api/admin/* admin token, /api/agent/* machine token)
-internal/store       SQLite schema + queries
-internal/bundle      tar.gz pack/unpack, stable digest, safe dir swap
-internal/inventory   version collection (names/versions/paths only — never env or config contents)
-internal/sync        client: config, lockfile, reconcile loop, symlinks, job whitelist
-internal/protocol    JSON shapes shared by both sides
-web/static           single-page console (vanilla JS, embedded into the binary)
-deploy/              Dockerfile compose + Caddy snippet
+cmd/agentdeckd        服务端入口
+cmd/agentdeck         机器端 CLI
+internal/api          HTTP 处理器（/api/admin/* 使用管理员令牌，/api/agent/* 使用机器令牌）
+internal/store        SQLite 数据库结构与查询
+internal/bundle       tar.gz 打包/解包、稳定摘要、安全目录替换
+internal/inventory    版本信息收集（仅名称、版本和路径，不收集环境变量或配置内容）
+internal/sync         客户端：配置、锁文件、协调循环、符号链接、任务白名单
+internal/protocol     两端共用的 JSON 数据结构
+web/static            单页控制台（原生 JS，内嵌到二进制文件中）
+deploy/               Dockerfile、Compose 配置和 Caddy 配置片段
 ```
