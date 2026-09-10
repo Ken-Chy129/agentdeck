@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,11 +42,11 @@ func TestShadowedCopiesDedupesPathAliases(t *testing.T) {
 
 	t.Setenv("PATH", other+string(os.PathListSeparator)+usrBin+string(os.PathListSeparator)+filepath.Join(root, "bin"))
 
-	got := shadowedCopies("foo", active)
+	got := shadowedCopies(context.Background(), "foo", active)
 	if len(got) != 2 {
 		t.Fatalf("want 2 distinct shadowed copies, got %d: %v", len(got), got)
 	}
-	if got[0] != filepath.Join(other, "foo") || got[1] != filepath.Join(usrBin, "foo") {
+	if got[0].Path != filepath.Join(other, "foo") || got[1].Path != filepath.Join(usrBin, "foo") {
 		t.Fatalf("unexpected copies: %v", got)
 	}
 }
@@ -69,7 +70,55 @@ func TestShadowedCopiesSkipsActiveAlias(t *testing.T) {
 	}
 	t.Setenv("PATH", usrBin+string(os.PathListSeparator)+filepath.Join(root, "bin"))
 
-	if got := shadowedCopies("foo", active); len(got) != 0 {
+	if got := shadowedCopies(context.Background(), "foo", active); len(got) != 0 {
 		t.Fatalf("want no shadowed copies, got %v", got)
+	}
+}
+
+// A hidden copy is only worth flagging if you know what it is: the console
+// tells "an old install is hijacking PATH" apart from "another app ships its
+// own copy" by comparing versions, so we have to collect them.
+func TestShadowedCopiesReportsVersions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixtures are a unix thing")
+	}
+	root := t.TempDir()
+	newer := filepath.Join(root, "newer")
+	mute := filepath.Join(root, "mute")
+	for _, d := range []string{newer, mute} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(newer, "foo"), []byte("#!/bin/sh\necho 'foo-cli 2.5.0'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Exits non-zero and says nothing, like a wrapper that wants a terminal.
+	if err := os.WriteFile(filepath.Join(mute, "foo"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	activeDir := filepath.Join(root, "active")
+	if err := os.MkdirAll(activeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(activeDir, "foo")
+	if err := os.WriteFile(active, []byte("#!/bin/sh\necho 'foo-cli 1.0.0'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sep := string(os.PathListSeparator)
+	t.Setenv("PATH", activeDir+sep+newer+sep+mute)
+
+	got := shadowedCopies(context.Background(), "foo", active)
+	if len(got) != 2 {
+		t.Fatalf("want 2 copies, got %d: %v", len(got), got)
+	}
+	if got[0].Version != "2.5.0" {
+		t.Errorf("want version 2.5.0 for the readable copy, got %q", got[0].Version)
+	}
+	// Unknown is fine; the UI just won't claim it's stale.
+	if got[1].Version != "" {
+		t.Errorf("want empty version for the silent copy, got %q", got[1].Version)
 	}
 }

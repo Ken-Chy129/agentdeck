@@ -150,7 +150,7 @@ func Collect(ctx context.Context) *protocol.Inventory {
 			}
 		}
 		tool.Upgrade = upgradeCommand(tool, real, npmPrefix)
-		tool.Shadowed = shadowedCopies(t.bin, p)
+		tool.Shadowed = shadowedCopies(ctx, t.bin, p)
 		inv.Tools = append(inv.Tools, tool)
 	}
 
@@ -210,8 +210,8 @@ func npmPrefixOf(realPath string) string {
 // /usr/bin on every merged-/usr distro, and $PATH lists both. Reporting
 // "shadowed 3x" for two real copies sends you hunting for an install that
 // doesn't exist, so we dedupe by the file each path resolves to.
-func shadowedCopies(bin, active string) []string {
-	var out []string
+func shadowedCopies(ctx context.Context, bin, active string) []protocol.ShadowedCopy {
+	var out []protocol.ShadowedCopy
 	seenPath := map[string]bool{active: true}
 	// os.SameFile compares device+inode, so hardlinks and symlink aliases of
 	// the same binary count once. Keep the FileInfos we've accepted so far.
@@ -246,12 +246,33 @@ func shadowedCopies(bin, active string) []string {
 			}
 			seenFiles = append(seenFiles, fi)
 		}
-		out = append(out, p)
+		out = append(out, protocol.ShadowedCopy{Path: p, Version: probeVersion(ctx, p)})
 		if len(out) >= 4 {
 			break
 		}
 	}
 	return out
+}
+
+// probeVersion asks a shadowed copy what it is. Knowing the version is what
+// separates "an old install is hijacking your PATH" from "that's just another
+// app shipping its own copy", so the console can stop calling every hidden
+// binary stale. Failure is expected and fine: wrapper scripts can want a TTY,
+// and some tools spell the flag differently.
+func probeVersion(ctx context.Context, path string) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	// A hidden copy is not something we were asked to run interactively; keep
+	// it from reading the terminal or inheriting our stdin.
+	cmd.Stdin = nil
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil && buf.Len() == 0 {
+		return ""
+	}
+	return firstVersion(buf.String())
 }
 
 // resolvedInfo stats the file a path ultimately points at, following symlinks,

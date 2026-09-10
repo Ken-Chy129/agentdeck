@@ -17,8 +17,17 @@ type CLITool struct {
 	Upgrade string `json:"upgrade,omitempty"`
 	// Shadowed lists other copies of this binary further down $PATH. Duplicate
 	// installs are a common cause of "I upgraded it but the old version keeps
-	// running".
-	Shadowed []string `json:"shadowed,omitempty"`
+	// running". Each copy carries its own version so the console can say
+	// whether the hidden one is older, newer or identical instead of guessing.
+	Shadowed []ShadowedCopy `json:"shadowed,omitempty"`
+}
+
+// ShadowedCopy is another executable with the same name further down $PATH.
+type ShadowedCopy struct {
+	Path string `json:"path"`
+	// Version is empty when the copy wouldn't report one (some wrappers need
+	// a real terminal, or use a flag we don't know).
+	Version string `json:"version,omitempty"`
 }
 
 type Runtime struct {

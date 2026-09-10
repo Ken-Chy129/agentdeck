@@ -96,6 +96,24 @@ function badge(k, ov, m, jobs) {
   return n ? `<span class="pill warn count">${n}</span>` : '';
 }
 
+// A copy further down $PATH is only a problem if it's actually stale. Another
+// app shipping its own (often newer) binary is normal, so compare versions and
+// say what we found instead of calling every hidden copy an old install.
+function shadowNote(t) {
+  const copies = (t.shadowed || []).map(c => typeof c === 'string' ? { path: c } : c);
+  if (!copies.length) return '';
+  const older = copies.filter(c => c.version && semverLt(c.version, t.version));
+  const bad = older.length > 0;
+  const label = bad
+    ? `另有 ${older.length} 份更旧的安装被遮挡`
+    : `另有 ${copies.length} 份同名副本（不生效）`;
+  const detail = copies.map(c => `${h(c.path)}${c.version ? ` <span class="faint">${h(c.version)}</span>` : ''}`).join('、');
+  const tip = bad
+    ? 'PATH 里还压着更旧的同名程序。虽然现在跑的是上面那个，但换个 shell 或改了 PATH 就可能用到旧的。'
+    : '同名程序在 PATH 更靠后的位置，不会被执行。版本不比当前的旧，通常是别的应用自带的副本，删了可能影响那个应用。';
+  return `<div class="${bad ? 'bad-text' : 'faint'} xs" title="${tip}">${label}：${detail}</div>`;
+}
+
 // ---- CLI ----
 async function tabCli(body, { m, id }) {
   const inv = m.inventory || {};
@@ -106,7 +124,7 @@ async function tabCli(body, { m, id }) {
   ${behind.length ? `<button class="small" id="upAll">升级全部（${behind.length}）</button>` : ''}</div>
   <table><thead><tr><th>工具</th><th>版本</th><th>最新</th><th>来源</th><th>路径</th><th></th></tr></thead><tbody>
   ${(inv.tools || []).map(t => { const lv = t.package ? latest[t.package] : ''; const old = lv && semverLt(t.version, lv); const cmd = upgradeCmd(t);
-    return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}${(t.shadowed || []).length ? `<div class="bad-text xs" title="PATH 里更靠后的位置还装着同名的另一份，不会被执行；同一个文件的多个路径别名已合并">另有 ${t.shadowed.length} 份旧安装（不生效）：${t.shadowed.map(x => h(x)).join('、')}</div>` : ''}</td>
+    return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}${shadowNote(t)}</td>
     <td class="right nowrap">${cmd ? `<button class="ghost small" onclick="copyText(${JSON.stringify(cmd)})">复制</button>
     <button class="small" data-up="${h(cmd)}" data-tool="${h(t.name)}">${old ? '升级' : '重装'}</button>` : ''}</td></tr>`; }).join('') || emptyRow(6, '尚无 inventory，等第一次 sync')}</tbody></table>
   <p class="help">升级命令由机器自己算出来（认得 npm prefix / nvm / native 安装器 / codex standalone），点「升级」直接在那台机器上跑。</p></div>
