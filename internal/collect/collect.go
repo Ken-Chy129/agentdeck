@@ -71,7 +71,9 @@ var (
 	// value patterns that are almost certainly secrets regardless of key name
 	secretValRe = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[A-Z0-9]{16}|ya29\.[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})`)
 	// key = "value" / key: value / key=value with a secret-ish key name
-	kvRe = regexp.MustCompile(`(?im)^(\s*"?[A-Za-z0-9_.-]*(?:key|token|secret|password|passwd|credential|apikey|api_key|auth)[A-Za-z0-9_.-]*"?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,#\n]+)`)
+	// The separator must not swallow a newline: "auth:\n  kind: none" would
+	// otherwise match across lines and redact the *next* line's value.
+	kvRe = regexp.MustCompile(`(?im)^([ \t]*"?[A-Za-z0-9_.-]*(?:key|token|secret|password|passwd|credential|apikey|api_key|auth)[A-Za-z0-9_.-]*"?[ \t]*[:=][ \t]*)("[^"\n]*"|'[^'\n]*'|[^\s,#\n]+)`)
 	// long random-looking strings (>= 32 chars of base64/hex-ish) anywhere
 	longRandRe = regexp.MustCompile(`\b[A-Za-z0-9_\-]{32,}\b`)
 	exportRe   = regexp.MustCompile(`^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$`)
@@ -90,6 +92,13 @@ func Fingerprint(v string) string { return fp(v) }
 var RedactedRe = regexp.MustCompile(`<redacted:([0-9a-f]{8})>`)
 
 func redactValue(v string) string {
+	// A secret-ish key whose value opens a nested block ("auth": {) has no
+	// secret on this line. Redacting the brace corrupts the document: the
+	// snapshot stops being parseable, which breaks anything that wants to read
+	// or edit it downstream.
+	if t := strings.TrimSpace(v); t == "{" || t == "[" || t == ">" || t == "|" {
+		return v
+	}
 	q := ""
 	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
 		q = string(v[0])
