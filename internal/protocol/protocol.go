@@ -175,6 +175,16 @@ const (
 	// JobSync asks the machine to run a full reconcile right now instead of
 	// waiting for its next scheduled sync. Payload is empty.
 	JobSync = "sync"
+	// JobFileEdit rewrites one collected config file. The console only ever
+	// held a redacted copy, so the machine resolves any remaining
+	// <redacted:fp> placeholder back to the real value before writing.
+	// {"path":"~/.claude/settings.json","content":"..."}
+	JobFileEdit = "file_edit"
+	// JobEnvSet rewrites a single `export NAME=value` line in a shell rc file.
+	// Targeting the one line instead of shipping the whole rc keeps everything
+	// else in that file (and the secrets we never collected) untouched.
+	// {"file":"~/.zshrc","name":"FOO","value":"bar"}
+	JobEnvSet = "env_set"
 )
 
 // ---- config collection (client -> server) ----

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Ken-Chy129/agentdeck/internal/collect"
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
 	"github.com/Ken-Chy129/agentdeck/internal/store"
 )
@@ -113,6 +114,80 @@ func (s *Server) runShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.st.Audit(r.Context(), "admin", "shell", id, req.Cmd)
+	s.wake.notify(id)
+	s.waitForJob(w, r, j, req.WaitSec, 30)
+}
+
+// editFile rewrites one collected config file on a machine.
+//
+// The path is validated here as well as on the machine: the console is the only
+// thing that can reach this endpoint, but "write an arbitrary file as the user"
+// is too sharp an edge to guard in one place only.
+func (s *Server) editFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		WaitSec int    `json:"wait_sec"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !collect.EditablePath(req.Path) {
+		writeErr(w, 400, "path is not an editable config file")
+		return
+	}
+	id := r.PathValue("id")
+	if _, err := s.st.MachineByID(r.Context(), id); err != nil {
+		writeErr(w, 404, "machine not found")
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"path": req.Path, "content": req.Content})
+	j, err := s.st.CreateJob(r.Context(), id, protocol.JobFileEdit, json.RawMessage(payload))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// Content can hold secrets, so audit the path only.
+	s.st.Audit(r.Context(), "admin", "file.edit", id, req.Path)
+	s.wake.notify(id)
+	s.waitForJob(w, r, j, req.WaitSec, 30)
+}
+
+// setExport rewrites one `export NAME=...` line in a machine's rc file.
+func (s *Server) setExport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		File    string `json:"file"`
+		Name    string `json:"name"`
+		Value   string `json:"value"`
+		Remove  bool   `json:"remove"`
+		WaitSec int    `json:"wait_sec"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !collect.EditableRC(req.File) {
+		writeErr(w, 400, "not a collected rc file")
+		return
+	}
+	if !envNameRe.MatchString(req.Name) {
+		writeErr(w, 400, "invalid env name")
+		return
+	}
+	id := r.PathValue("id")
+	if _, err := s.st.MachineByID(r.Context(), id); err != nil {
+		writeErr(w, 404, "machine not found")
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"file": req.File, "name": req.Name, "value": req.Value, "remove": req.Remove})
+	j, err := s.st.CreateJob(r.Context(), id, protocol.JobEnvSet, json.RawMessage(payload))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// The value may be a credential, so audit the name and file only.
+	s.st.Audit(r.Context(), "admin", "env.rc.edit", id, req.File+":"+req.Name)
 	s.wake.notify(id)
 	s.waitForJob(w, r, j, req.WaitSec, 30)
 }

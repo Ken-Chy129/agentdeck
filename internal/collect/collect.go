@@ -29,6 +29,39 @@ var configFiles = []struct{ tool, rel, format string }{
 	{"agentdeck", ".config/agentdeck/env.sh", "sh"},
 }
 
+// EditablePaths is the set of files the console may rewrite: exactly the ones
+// we collect, expressed the same way we report them ("~/"-prefixed).
+func EditablePaths() []string {
+	out := make([]string, 0, len(configFiles)+len(rcFiles))
+	for _, c := range configFiles {
+		out = append(out, "~/"+c.rel)
+	}
+	for _, rc := range rcFiles {
+		out = append(out, "~/"+rc)
+	}
+	return out
+}
+
+// EditableRC reports whether path is a shell rc file we collect exports from.
+func EditableRC(path string) bool {
+	for _, rc := range rcFiles {
+		if path == "~/"+rc {
+			return true
+		}
+	}
+	return false
+}
+
+// EditablePath reports whether the console may rewrite this path.
+func EditablePath(path string) bool {
+	for _, p := range EditablePaths() {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
+
 var rcFiles = []string{".zshenv", ".zprofile", ".zshrc", ".bash_profile", ".bashrc", ".profile"}
 
 const maxFile = 256 << 10
@@ -48,6 +81,13 @@ func fp(v string) string {
 	h := sha256.Sum256([]byte(v))
 	return hex.EncodeToString(h[:4])
 }
+
+// Fingerprint exposes the redaction fingerprint so the machine can map a
+// placeholder the console sends back to the real secret it stands for.
+func Fingerprint(v string) string { return fp(v) }
+
+// RedactedRe matches the placeholder Redact leaves behind.
+var RedactedRe = regexp.MustCompile(`<redacted:([0-9a-f]{8})>`)
 
 func redactValue(v string) string {
 	q := ""

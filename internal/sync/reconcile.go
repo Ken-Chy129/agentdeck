@@ -444,6 +444,44 @@ func runJob(ctx context.Context, j protocol.Job) (string, error) {
 			return "", fmt.Errorf("refusing formula %q", p.Formula)
 		}
 		return shell(ctx, "brew", "upgrade", p.Formula)
+	case protocol.JobFileEdit:
+		var p struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(j.Payload, &p); err != nil {
+			return "", err
+		}
+		backup, err := apply.WriteConfigFile(p.Path, p.Content)
+		if err != nil {
+			return "", err
+		}
+		if backup == "" {
+			return "no change: " + p.Path + " already had this content", nil
+		}
+		return "wrote " + p.Path + " (backup: " + backup + ")", nil
+	case protocol.JobEnvSet:
+		var p struct {
+			File   string `json:"file"`
+			Name   string `json:"name"`
+			Value  string `json:"value"`
+			Remove bool   `json:"remove"`
+		}
+		if err := json.Unmarshal(j.Payload, &p); err != nil {
+			return "", err
+		}
+		backup, err := apply.SetExport(p.File, p.Name, p.Value, p.Remove)
+		if err != nil {
+			return "", err
+		}
+		if backup == "" {
+			return "no change: " + p.Name + " already had this value", nil
+		}
+		verb := "updated"
+		if p.Remove {
+			verb = "removed"
+		}
+		return verb + " " + p.Name + " in " + p.File + " (backup: " + backup + ")", nil
 	case protocol.JobShell:
 		var p struct {
 			Cmd        string `json:"cmd"`

@@ -62,6 +62,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/machines/{id}/jobs", s.withAdmin(s.createJob))
 	mux.HandleFunc("POST /api/admin/machines/{id}/shell", s.withAdmin(s.runShell))
 	mux.HandleFunc("POST /api/admin/machines/{id}/sync", s.withAdmin(s.syncNow))
+	mux.HandleFunc("POST /api/admin/machines/{id}/file", s.withAdmin(s.editFile))
+	mux.HandleFunc("POST /api/admin/machines/{id}/rc-export", s.withAdmin(s.setExport))
 	mux.HandleFunc("GET /api/admin/jobs/{id}", s.withAdmin(s.getJob))
 	mux.HandleFunc("POST /api/admin/machines/{id}/import-env", s.withAdmin(s.requestImport))
 	mux.HandleFunc("DELETE /api/admin/jobs/{id}", s.withAdmin(s.cancelJob))

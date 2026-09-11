@@ -199,6 +199,18 @@ export async function runRemote(machineID, cmd, { timeoutSec = 600, waitSec = 60
   return api('POST', `/api/admin/machines/${machineID}/shell`, { cmd, timeout_sec: timeoutSec, wait_sec: waitSec });
 }
 
+// Rewrite one collected config file on a machine. The body may still contain
+// <redacted:fp> placeholders; resolving them is the machine's job, which is
+// what keeps the real secrets off the wire.
+export async function editFile(machineID, path, content, { waitSec = 60 } = {}) {
+  return api('POST', `/api/admin/machines/${machineID}/file`, { path, content, wait_sec: waitSec });
+}
+
+// Rewrite a single `export NAME=...` line in a machine's shell rc file.
+export async function setRcExport(machineID, { file, name, value = '', remove = false, waitSec = 60 } = {}) {
+  return api('POST', `/api/admin/machines/${machineID}/rc-export`, { file, name, value, remove, wait_sec: waitSec });
+}
+
 // Ask a machine to reconcile right now. The server wakes its long poll and
 // holds the request until the sync finishes, so this usually returns with the
 // result already in hand.

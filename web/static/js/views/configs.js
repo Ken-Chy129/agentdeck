@@ -1,4 +1,4 @@
-import { $, $$, app, api, h, ago, kb, overview, configs, syncState, pill, toast, fail, ask, modal, closeModal, fmtTime, shortDigest, online, invalidate, pageHeader, crumb, empty, emptyRow } from '../core.js';
+import { $, $$, app, api, h, ago, kb, overview, configs, syncState, pill, toast, fail, ask, modal, closeModal, fmtTime, shortDigest, online, invalidate, pageHeader, crumb, empty, emptyRow, editFile, syncNow, awaitJob, jobPending } from '../core.js';
 
 const KNOWN_TOOLS = [
   { tool: 'claude', path: '~/.claude/settings.json', format: 'json' },
@@ -40,14 +40,61 @@ function renderSnapshots(area, machines, tool) {
   let sel = rows[0] ? { mid: rows[0].m.machine_id, i: 0 } : null;
   const draw = () => {
     const cur = sel && rows.find(x => x.m.machine_id === sel.mid); const file = cur?.files[sel.i];
+    const editable = file && !file.truncated;
     area.innerHTML = `<div class="narrow card tight filelist">${rows.map(x => `<div class="group"><span class="dot ${online(x.m.snapshot_at)}"></span>${h(x.m.machine_name)} <span class="faint">${ago(x.m.snapshot_at)}</span></div>
         ${x.files.map((f, i) => `<div class="item ${x.m.machine_id === sel?.mid && i === sel.i ? 'active' : ''}" data-sel="${x.m.machine_id}:${i}">${h(f.path)}<div class="sub">${kb(f.size)} · 改于 ${ago(f.mod_time)}</div></div>`).join('')}`).join('')}</div>
-      <div class="card">${file ? `<div class="row between mb8"><span class="mono small"><b>${h(cur.m.machine_name)}</b> · ${h(file.path)}</span><div class="row"><span class="pill">${h(file.format)}</span><button class="ghost small" id="tpl">以此为模板新建 Profile</button></div></div>
-        <pre class="fill">${h(file.truncated ? '(文件过大，未采集)' : file.content)}</pre>` : empty('选择左侧一个文件')}</div>`;
+      <div class="card">${file ? `<div class="row between mb8"><span class="mono small"><b>${h(cur.m.machine_name)}</b> · ${h(file.path)}</span><div class="row"><span class="pill">${h(file.format)}</span>${editable ? '<button class="ghost small" id="edit">编辑</button>' : ''}<button class="ghost small" id="tpl">以此为模板新建 Profile</button></div></div>
+        <pre class="fill" id="view">${h(file.truncated ? '(文件过大，未采集)' : file.content)}</pre>` : empty('选择左侧一个文件')}</div>`;
     $$('[data-sel]', area).forEach(d => d.onclick = () => { const [mid, i] = d.dataset.sel.split(':'); sel = { mid, i: +i }; draw(); });
     $('#tpl', area)?.addEventListener('click', () => { sessionStorage.setItem('agentdeck_cfg_template', JSON.stringify({ tool: file.tool, path: file.path, format: file.format, content: file.content, from: cur.m.machine_name })); location.hash = '#/configs/_/new'; });
+    $('#edit', area)?.addEventListener('click', () => editFileInline(area, cur.m, file, draw));
   };
   draw();
+}
+
+// Swaps the read-only preview for an editor. The text shown here is the
+// redacted copy, so <redacted:fp> placeholders are left in place deliberately:
+// the machine swaps them back to the real secret before writing.
+function editFileInline(area, machine, file, redraw) {
+  const card = $('#view', area).parentElement;
+  card.innerHTML = `<div class="row between mb8"><span class="mono small"><b>${h(machine.machine_name)}</b> · ${h(file.path)}</span><span class="pill">${h(file.format)}</span></div>
+    <textarea id="fileEdit" style="min-height:52vh">${h(file.content)}</textarea>
+    <p class="help">保存会下发给机器改写这个文件，原文件留一份 <code>.agentdeck-bak</code> 备份。<b>带 <code>&lt;redacted:…&gt;</code> 的行照原样留着即可</b>——机器端会换回真实的值；手动改写它反而会把凭证写坏。</p>
+    <div class="row end" style="gap:8px"><button class="ghost" id="fileCancel">取消</button><button id="fileSave">保存到机器</button></div>`;
+  const ta = $('#fileEdit', card);
+  ta.focus();
+  $('#fileCancel', card).onclick = redraw;
+  $('#fileSave', card).onclick = async () => {
+    const text = ta.value;
+    if (file.format === 'json') {
+      // Placeholders aren't valid JSON on their own, but they sit inside
+      // strings, so the text still parses. A real syntax error is worth
+      // catching before we make a round trip to the machine.
+      try { JSON.parse(text); } catch (e) { return fail(new Error('不是合法 JSON: ' + e.message)); }
+    }
+    if (text === file.content) return fail(new Error('内容没有变化'));
+    const btn = $('#fileSave', card);
+    btn.disabled = true; btn.textContent = '下发中…';
+    try {
+      await saveFile(machine.machine_id, file.path, text);
+      toast('已写入机器');
+      invalidate();
+      window.reroute?.();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '保存到机器';
+      fail(e);
+    }
+  };
+}
+
+// Writes the file, then makes the machine re-collect so the page doesn't keep
+// showing the copy we just replaced.
+async function saveFile(machineID, path, content) {
+  let j = await editFile(machineID, path, content, { waitSec: 60 });
+  if (jobPending(j.status)) j = await awaitJob(j.id, { tries: 60, everyMs: 2000 }) || j;
+  if (jobPending(j.status)) throw new Error('机器还没接单。它可能不在线，稍后去「任务」页看结果。');
+  if (j.status !== 'done') throw new Error(j.result || '写入失败');
+  try { await syncNow(machineID, { waitSec: 60 }); } catch {}
 }
 
 // ---- Profile 详情 ----

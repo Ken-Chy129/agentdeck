@@ -1,4 +1,4 @@
-import { $, $$, app, api, h, ago, overview, configs, syncState, pill, toast, fail, ask, modal, closeModal, fmtTime, shortDigest, trunc, copy, invalidate, pageHeader, crumb, empty, emptyRow } from '../core.js';
+import { $, $$, app, api, h, ago, overview, configs, syncState, pill, toast, fail, ask, modal, closeModal, fmtTime, shortDigest, trunc, copy, invalidate, pageHeader, crumb, empty, emptyRow, setRcExport, syncNow, awaitJob, jobPending } from '../core.js';
 
 export async function envView(id) {
   if (id) return envDetail(id);
@@ -16,10 +16,10 @@ export async function envView(id) {
 
   const cell = (n, m) => {
     const r = byName[n]; const st = r && syncState(ov, m, r); const ex = collected[n]?.[m.id];
-    const rcNote = ex ? `<div class="sub-note mono" title="这台机器 rc 里还有一份：${h(ex.file)}:${ex.line}">rc: ${rcVal(ex)}</div>` : '';
+    const rcNote = ex ? `<div class="sub-note mono" title="这台机器 rc 里还有一份：${h(ex.file)}:${ex.line}">rc: ${rcVal(ex)} <button class="link small" data-rcedit="${h(n)}" data-rcm="${m.id}">改</button></div>` : '';
     if (st) return `<td class="c"><label class="cellbox"><input type="checkbox" data-r="${r.id}" data-m="${m.id}" checked>${pill(st)}${st.a.has_override ? '<span class="chip ov" title="这台机器用独立取值">*</span>' : ''}</label>${rcNote}</td>`;
     if (r) return `<td class="c"><label class="cellbox"><input type="checkbox" data-r="${r.id}" data-m="${m.id}"><span class="faint small">未分发</span></label>${rcNote}</td>`;
-    if (ex) return `<td class="c"><span class="mono small" title="${h(ex.file)}:${ex.line}">${rcVal(ex)}</span><div><button class="link small" data-import="${h(n)}" data-from="${m.id}">从这台导入</button></div></td>`;
+    if (ex) return `<td class="c"><span class="mono small" title="${h(ex.file)}:${ex.line}">${rcVal(ex)}</span><div><button class="link small" data-import="${h(n)}" data-from="${m.id}">从这台导入</button> <button class="link small" data-rcedit="${h(n)}" data-rcm="${m.id}">改</button></div></td>`;
     return '<td class="c faint">—</td>';
   };
   const consistency = (n) => { const per = collected[n] || {}; const vals = new Set(Object.values(per).map(e => e.kind === 'secret' ? e.fingerprint : e.value)); return vals.size > 1 ? ' <span class="pill warn" title="各机器 rc 里的取值不一致">rc 不一致</span>' : ''; };
@@ -43,6 +43,7 @@ export async function envView(id) {
   $$('[data-edit]').forEach(b => b.onclick = () => editEnv(ov.byResource[+b.dataset.edit]));
   $$('[data-reveal]').forEach(b => b.onclick = async () => { const v = await api('GET', `/api/admin/resources/${b.dataset.reveal}/reveal`); const span = b.previousElementSibling; span.textContent = v.value; span.className = 'mono small'; b.textContent = '复制'; b.onclick = () => copy(v.value); });
   $$('input[data-r]').forEach(c => c.onchange = async () => { try { await api('PUT', '/api/admin/assignments', { machine_id: c.dataset.m, resource_id: +c.dataset.r, assigned: c.checked }); toast(c.checked ? '已分发，机器下次 sync 写入' : '已取消，下次 sync 移除'); invalidate(); reroute(); } catch (e) { c.checked = !c.checked; fail(e); } });
+  $$('[data-rcedit]').forEach(b => b.onclick = () => editRc(ov.byMachine[b.dataset.rcm], collected[b.dataset.rcedit][b.dataset.rcm]));
   $$('[data-import]').forEach(b => b.onclick = async () => {
     const m = ov.byMachine[b.dataset.from];
     if (!await ask('导入到总表', `让 <b>${h(m.name)}</b> 下次 sync 时读取 <code>${h(b.dataset.import)}</code> 的真实值，加密回传到总表，并自动分发给它自己。<br><br>机器每 15 分钟 sync 一次；着急的话在那台机器上跑 <code>agentdeck sync</code>。`, '导入')) return;
@@ -109,4 +110,39 @@ export async function envDetail(id) {
     $('#ok', box).onclick = async () => { const v = $('#ovVal', box).value; if (!v) return fail(new Error('值不能为空')); await api('PUT', '/api/admin/assignments', { machine_id: m.id, resource_id: r.id, assigned: true, set_override: true, override: v }); closeModal(); toast('已保存'); invalidate(); reroute(); };
   });
   $$('[data-ovclear]').forEach(b => b.onclick = async () => { await api('PUT', '/api/admin/assignments', { machine_id: b.dataset.ovclear, resource_id: r.id, assigned: true, set_override: true, override: '' }); toast('已改回跟随总表'); invalidate(); reroute(); });
+}
+
+// Edits the `export NAME=...` line a machine has in its own rc file. Secrets
+// were never collected in the clear, so there is nothing to prefill: an empty
+// box means "leave it alone", and saving always writes what you typed.
+function editRc(m, ex) {
+  const secret = ex.kind === 'secret';
+  const box = modal(`<h3>改 ${h(m.name)} 的 <span class="mono">${h(ex.name)}</span></h3>
+    <p class="muted small">直接改这台机器 <code>${h(ex.file)}</code> 第 ${ex.line} 行；同文件其他内容不动，原文件留一份 <code>.agentdeck-bak</code>。新值对之后新开的 shell 生效。</p>
+    <div class="field"><label>新的值${secret ? ' <span class="faint">（当前值是秘密，没有采集明文，需完整填写）</span>' : ''}</label>
+      <input id="rcVal" class="mono" autocomplete="off" value="${secret ? '' : h(ex.value)}"></div>
+    <div class="row end" style="gap:8px"><button class="danger small" id="rcDel">删掉这行</button><button class="ghost" id="c">取消</button><button id="ok">保存</button></div>`);
+  $('#c', box).onclick = closeModal;
+  $('#ok', box).onclick = () => applyRc(box, m.id, { file: ex.file, name: ex.name, value: $('#rcVal', box).value });
+  $('#rcDel', box).onclick = async () => {
+    if (!await ask('删除这行', `从 <b>${h(m.name)}</b> 的 <code>${h(ex.file)}</code> 里删掉 <code>export ${h(ex.name)}</code>？`, '删除', true)) return;
+    applyRc(box, m.id, { file: ex.file, name: ex.name, remove: true });
+  };
+}
+
+async function applyRc(box, machineID, body) {
+  const ok = $('#ok', box);
+  if (ok) { ok.disabled = true; ok.textContent = '下发中…'; }
+  try {
+    let j = await setRcExport(machineID, body);
+    if (jobPending(j.status)) j = await awaitJob(j.id, { tries: 60, everyMs: 2000 }) || j;
+    if (jobPending(j.status)) throw new Error('机器还没接单，稍后去「任务」页看结果。');
+    if (j.status !== 'done') throw new Error(j.result || '写入失败');
+    // Re-collect so the rc: hint reflects what's on disk now.
+    try { await syncNow(machineID, { waitSec: 60 }); } catch {}
+    closeModal(); toast('已写入机器'); invalidate(); window.reroute?.();
+  } catch (e) {
+    if (ok) { ok.disabled = false; ok.textContent = '保存'; }
+    fail(e);
+  }
 }
