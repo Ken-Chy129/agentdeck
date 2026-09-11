@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Ken-Chy129/agentdeck/internal/protocol"
@@ -104,7 +105,15 @@ func redactValue(v string) string {
 	// secret on this line. Redacting the brace corrupts the document: the
 	// snapshot stops being parseable, which breaks anything that wants to read
 	// or edit it downstream.
-	if t := strings.TrimSpace(v); t == "{" || t == "[" || t == ">" || t == "|" {
+	t := strings.TrimSpace(v)
+	if t == "{" || t == "[" || t == ">" || t == "|" {
+		return v
+	}
+	// Nor can a number, bool or null be a credential. Key names match on
+	// substrings, so "token_budget": { "reminder_threshold_tokens": 20000 }
+	// hits the "token" rule and used to come back as an unquoted placeholder,
+	// which is not valid JSON.
+	if !isSecretShaped(t) {
 		return v
 	}
 	q := ""
@@ -116,6 +125,20 @@ func redactValue(v string) string {
 		return q + q
 	}
 	return q + "<redacted:" + fp(v) + ">" + q
+}
+
+// isSecretShaped reports whether a value could plausibly hold a credential.
+// Scalars that a config format defines structurally (numbers, bools, null)
+// never do, and rewriting them breaks the document.
+func isSecretShaped(v string) bool {
+	switch strings.ToLower(v) {
+	case "", "true", "false", "null", "nil", "none", "yes", "no", "on", "off":
+		return false
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return false
+	}
+	return true
 }
 
 // Redact scrubs secrets from arbitrary config text.

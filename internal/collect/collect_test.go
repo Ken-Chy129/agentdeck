@@ -63,3 +63,25 @@ func TestEditablePath(t *testing.T) {
 		t.Fatal("a config file is not an rc file")
 	}
 }
+
+// Key names match on substrings, so codex's model catalog tripped the "token"
+// rule on plain numbers: "reminder_threshold_tokens": 20000 came back as an
+// unquoted <redacted:...>, which isn't valid JSON.
+func TestRedactKeepsNumbersAndBools(t *testing.T) {
+	in := `{
+  "token_budget": {
+    "reminder_threshold_tokens": 20000,
+    "auto_compact_fallback_buffer_tokens": 8192,
+    "auth_enabled": true,
+    "secret_rotation": null
+  }
+}`
+	out := Redact(in)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("redacted snapshot is not valid JSON: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "<redacted") {
+		t.Fatalf("numbers and bools can't be credentials, but got:\n%s", out)
+	}
+}
