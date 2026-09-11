@@ -1,5 +1,5 @@
 // AgentDeck console entry: login + hash routing. Vanilla ES modules, no build step.
-import { $, $$, app, api, h, token, setToken, setUnauthorizedHandler, fail, loading } from './core.js';
+import { $, $$, app, api, h, token, setToken, setUnauthorizedHandler, fail, loading, closeModal } from './core.js';
 import { overviewView } from './views/overview.js';
 import { machinesView, machineDetail } from './views/machines.js';
 import { skillsView, skillDetail, skillEditor } from './views/skills.js';
@@ -44,6 +44,9 @@ export async function route() {
     await view(decodeURIComponent(id || ''), rest.map(decodeURIComponent).join('/'));
   } catch (e) { if (my === seq) fail(e); } finally { if (my === seq) loading(false); }
 }
-window.addEventListener('hashchange', route);
+// Navigating away should never leave a dialog floating over the new page. This
+// is deliberately on hashchange rather than in route(), because a re-render
+// triggered by a finished job (reroute) must keep its modal open.
+window.addEventListener('hashchange', () => { closeModal(); route(); });
 window.reroute = route;
 route();

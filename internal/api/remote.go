@@ -20,12 +20,15 @@ func (s *Server) agentPoll(w http.ResponseWriter, r *http.Request) {
 	m := machineFrom(r)
 	ctx := r.Context()
 
+	// Register before looking at the queue. The other order loses a job created
+	// in between: nobody is listening yet when notify fires, and the machine
+	// then waits out the full poll timeout for work that was already waiting.
+	ch, done := s.wake.wait(m.ID)
+	defer done()
+
 	if jobs := s.queuedJobs(w, r); jobs == nil || len(jobs) > 0 {
 		return
 	}
-
-	ch, done := s.wake.wait(m.ID)
-	defer done()
 
 	select {
 	case <-ch:
