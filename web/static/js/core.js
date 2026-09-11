@@ -74,7 +74,30 @@ export const shortDigest = (d) => (d || '').replace(/^sha256:/, '').slice(0, 12)
 export const fmtTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '';
 export const trunc = (s, n = 48) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 
-export function copy(text) { navigator.clipboard.writeText(text).then(() => toast('已复制')); }
+// navigator.clipboard only exists in a secure context (https or localhost), so
+// over plain http the copy button used to throw and say nothing at all. Fall
+// back to a hidden textarea, and tell the user when even that fails instead of
+// leaving them wondering whether the click registered.
+export function copy(text) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('已复制'), () => legacyCopy(text));
+    return;
+  }
+  legacyCopy(text);
+}
+
+function legacyCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  toast(ok ? '已复制' : '复制失败，请手动选中命令复制', !ok);
+}
 export async function dl(href, fn) {
   const r = await fetch(href, { headers: { Authorization: 'Bearer ' + token } });
   const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = fn; a.click();

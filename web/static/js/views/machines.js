@@ -1,4 +1,4 @@
-import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill, runRemote, syncNow, awaitJob, jobPending } from '../core.js';
+import { $, $$, app, api, h, ago, online, kb, semverLt, overview, npmLatest, syncState, pill, upgradeCmd, toast, fail, copy, modal, closeModal, ask, fmtTime, trunc, invalidate, pageHeader, crumb, empty, emptyRow, statusPill, runRemote, syncNow, awaitJob, jobPending } from '../core.js';
 
 const AGENT_TOOLS = ['claude', 'codex', 'gemini', 'hermes', 'opencode', 'cursor-agent', 'gh', 'lark-cli', 'bytedcli'];
 
@@ -15,7 +15,7 @@ export async function machinesView() {
     e.preventDefault(); e.stopPropagation();
     const m = ms.find(x => x.id === b.dataset.upall);
     const cmds = (m.inventory?.tools || []).filter(t => { const lv = t.package ? latest[t.package] : ''; return lv && semverLt(t.version, lv) && upgradeCmd(t); });
-    execModal(m.id, cmds.map(t => upgradeCmd(t)).join(' && '), `升级 ${m.name}：${cmds.map(t => t.name).join(' / ')}`);
+    execModal(m.id, cmds.map(t => upgradeCmd(t)).join(' && '), `升级 ${m.name}：${cmds.map(t => t.name).join(' / ')}`, { refreshInventory: true });
   });
   // Per-machine sync from the list, so you don't have to open each card.
   $$('[data-sync]').forEach(b => b.onclick = (e) => {
@@ -125,24 +125,32 @@ async function tabCli(body, { m, id }) {
   <table><thead><tr><th>工具</th><th>版本</th><th>最新</th><th>来源</th><th>路径</th><th></th></tr></thead><tbody>
   ${(inv.tools || []).map(t => { const lv = t.package ? latest[t.package] : ''; const old = lv && semverLt(t.version, lv); const cmd = upgradeCmd(t);
     return `<tr><td class="mono">${h(t.name)}</td><td class="mono ${old ? 'behind' : ''}">${h(t.version || '?')}</td><td class="mono muted">${h(lv || '')}</td><td class="muted small">${h(t.source)}${t.package ? ` <span class="faint">· ${h(t.package)}</span>` : ''}</td><td class="mono xs faint">${h(t.path || '')}${shadowNote(t)}</td>
-    <td class="right nowrap">${cmd ? `<button class="ghost small" onclick="copyText(${JSON.stringify(cmd)})">复制</button>
+    <td class="right nowrap">${cmd ? `<button class="ghost small" data-copy="${h(cmd)}" title="复制升级命令，到那台机器上自己跑">复制</button>
     <button class="small" data-up="${h(cmd)}" data-tool="${h(t.name)}">${old ? '升级' : '重装'}</button>` : ''}</td></tr>`; }).join('') || emptyRow(6, '尚无 inventory，等第一次 sync')}</tbody></table>
   <p class="help">升级命令由机器自己算出来（认得 npm prefix / nvm / native 安装器 / codex standalone），点「升级」直接在那台机器上跑。</p></div>
   <h2>运行时</h2><div class="card flush"><table><tbody>${(inv.runtimes || []).map(r => `<tr><td class="mono">${h(r.name)}</td><td class="mono">${h(r.version)}</td><td class="mono xs faint">${h(r.path)}</td></tr>`).join('') || emptyRow(3, '无')}</tbody></table>
   <div class="help"><details><summary>npm -g 全部 ${(inv.npm_global || []).length} 个 · brew ${(inv.brew || []).length} 个</summary>
   <div class="cols mt8"><table><tbody>${(inv.npm_global || []).map(p => `<tr><td class="mono small">${h(p.name)}</td><td class="mono small muted right">${h(p.version)}</td></tr>`).join('')}</tbody></table>
   <table><tbody>${(inv.brew || []).map(p => `<tr><td class="mono small">${h(p.name)}</td><td class="mono small muted right">${h(p.version)}</td></tr>`).join('')}</tbody></table></div></details></div></div>`;
-  $$('[data-up]', body).forEach(b => b.onclick = () => execModal(id, b.dataset.up, `升级 ${b.dataset.tool}`));
+  // Inline confirmation: a toast alone is easy to miss when your eyes are on
+  // the button you just clicked.
+  $$('[data-copy]', body).forEach(b => b.onclick = () => {
+    copy(b.dataset.copy);
+    const was = b.textContent;
+    b.textContent = '已复制';
+    setTimeout(() => { b.textContent = was; }, 1200);
+  });
+  $$('[data-up]', body).forEach(b => b.onclick = () => execModal(id, b.dataset.up, `升级 ${b.dataset.tool}`, { refreshInventory: true }));
   if ($('#upAll', body)) $('#upAll', body).onclick = () => {
     const cmds = behind.map(t => upgradeCmd(t));
-    execModal(id, cmds.join(' && '), `升级 ${behind.map(t => t.name).join(' / ')}`);
+    execModal(id, cmds.join(' && '), `升级 ${behind.map(t => t.name).join(' / ')}`, { refreshInventory: true });
   };
 }
 
 // ---- remote job modal ----
 // Queues work on the machine and streams the result into a modal. Shared by the
 // upgrade buttons and「立即同步」so neither needs an SSH session.
-async function jobModal({ id, title, subject, hint, start, okToast = '执行成功', failToast = '执行失败，看输出' }) {
+async function jobModal({ id, title, subject, hint, start, okToast = '执行成功', failToast = '执行失败，看输出', afterDone }) {
   modal(`<h3>${h(title)}</h3>
     ${subject}
     <div id="execOut" class="term term-tall muted">等机器接单…（在线的话几秒内开始）</div>
@@ -171,7 +179,11 @@ async function jobModal({ id, title, subject, hint, start, okToast = '执行成�
     out.classList.remove('muted');
     delete out.dataset.phase;
     out.textContent = j.result || '(无输出)';
-    if (j.status === 'done') { toast(okToast); invalidate(); } else { toast(failToast, true); }
+    if (j.status !== 'done') { toast(failToast, true); return; }
+    toast(okToast);
+    invalidate();
+    if (afterDone) await afterDone(out);
+    reroute();
   } catch (e) {
     clearInterval(tick);
     out.classList.remove('muted');
@@ -181,12 +193,31 @@ async function jobModal({ id, title, subject, hint, start, okToast = '执行成�
 }
 
 // Runs a command on the machine. Used by the upgrade buttons.
-export async function execModal(id, cmd, title) {
+//
+// An upgrade that finishes but still shows the old version is worse than no
+// feedback at all, so we re-read the machine's inventory before re-rendering.
+// The version in the table comes from the agent, not from this command, and it
+// only changes once the machine reports again.
+export async function execModal(id, cmd, title, { refreshInventory = false } = {}) {
   return jobModal({
     id, title: title || '在机器上执行',
     subject: `<pre class="mono" style="white-space:pre-wrap;margin-top:0">$ ${h(cmd)}</pre>`,
     hint: '升级可能要跑 1-2 分钟。关掉这个框不会中断执行，稍后可在「任务」页看结果。',
     start: () => runRemote(id, cmd, { waitSec: 60 }),
+    afterDone: refreshInventory ? async (out) => {
+      const note = document.createElement('div');
+      note.className = 'help';
+      note.textContent = '正在让机器重新上报版本…';
+      out.after(note);
+      try {
+        await syncNow(id, { waitSec: 60 });
+        note.textContent = '版本已刷新。';
+      } catch {
+        // The upgrade itself worked; a failed refresh just means the table
+        // still shows the old version until the next scheduled sync.
+        note.textContent = '升级成功，但刷新版本失败。稍后点「立即同步」再看。';
+      }
+    } : null,
   });
 }
 
