@@ -25,3 +25,6 @@ deploy:
 	ssh server 'mkdir -p /opt/agentdeck/src /opt/agentdeck/data && find /opt/agentdeck/src -mindepth 1 -delete'
 	git archive --format=tar HEAD | ssh server 'tar -x -C /opt/agentdeck/src'
 	ssh server 'cd /opt/agentdeck/src/deploy && docker compose up -d --build && docker image prune -f >/dev/null && docker ps --filter name=agentdeck --format "{{.Names}} {{.Status}} {{.Ports}}"'
+	# Each --build keeps its layers around. Left alone this grew to 34GB and
+	# filled the disk, which took the server down with SQLite I/O errors.
+	ssh server 'docker builder prune -af >/dev/null && echo "build cache pruned"'

@@ -29,6 +29,10 @@ var knownTools = []struct{ bin, pkg string }{
 	{"opencode", "opencode-ai"},
 	{"aider", ""},
 	{"gh", ""},
+	{"lark-cli", "@larksuite/cli"},
+	// Internal registry only: we still report the installed version, but the
+	// console can't compare it against a public "latest".
+	{"bytedcli", "@bytedance-dev/bytedcli"},
 	{"agentdeck", ""},
 }
 

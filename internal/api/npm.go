@@ -15,6 +15,7 @@ type npmCache struct {
 	mu       sync.Mutex
 	items    map[string]npmItem
 	inflight map[string]bool
+	base     string
 }
 
 type npmItem struct {
@@ -24,8 +25,10 @@ type npmItem struct {
 
 const npmFresh = 30 * time.Minute
 
+const npmRegistry = "https://registry.npmjs.org/"
+
 func newNpmCache() *npmCache {
-	return &npmCache{items: map[string]npmItem{}, inflight: map[string]bool{}}
+	return &npmCache{items: map[string]npmItem{}, inflight: map[string]bool{}, base: npmRegistry}
 }
 
 // getMany resolves all packages concurrently.
@@ -82,7 +85,7 @@ func (c *npmCache) refreshAsync(pkg string) {
 func (c *npmCache) fetch(ctx context.Context, pkg string) string {
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", "https://registry.npmjs.org/"+pkg+"/latest", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", c.base+pkg+"/latest", nil)
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -93,9 +96,9 @@ func (c *npmCache) fetch(ctx context.Context, pkg string) string {
 		Version string `json:"version"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&doc)
-	if doc.Version == "" {
-		return ""
-	}
+	// Cache the miss too. Internal-registry packages (bytedcli) will never be
+	// on npmjs.org, and without this every page load pays the lookup again.
+	// An empty version simply means "no latest to compare against".
 	c.mu.Lock()
 	c.items[pkg] = npmItem{version: doc.Version, at: time.Now()}
 	c.mu.Unlock()
