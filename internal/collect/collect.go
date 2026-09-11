@@ -20,6 +20,11 @@ var configFiles = []struct{ tool, rel, format string }{
 	{"claude", ".claude/settings.json", "json"},
 	{"codex", ".codex/config.toml", "toml"},
 	{"codex", ".codex/hooks.json", "json"},
+	// Which models codex offers, and their reasoning levels. config.toml only
+	// names the active one (model = ...) and points here via
+	// model_catalog_json, so without this the console can't tell you what a
+	// machine is actually able to select.
+	{"codex", ".codex/models/custom-models.json", "json"},
 	{"hermes", ".hermes/config.yaml", "yaml"},
 	{"lark-cli", ".lark-cli/config.json", "json"},
 	{"gh", ".config/gh/config.yml", "yaml"},
@@ -64,7 +69,10 @@ func EditablePath(path string) bool {
 
 var rcFiles = []string{".zshenv", ".zprofile", ".zshrc", ".bash_profile", ".bashrc", ".profile"}
 
-const maxFile = 256 << 10
+// Big enough for codex's model catalog, which is ~400KB of generated JSON.
+// The cap exists to keep one pathological file from bloating every sync, not
+// to police legitimate config.
+const maxFile = 1 << 20
 
 var (
 	secretKeyRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|credential|auth|cookie)`)
